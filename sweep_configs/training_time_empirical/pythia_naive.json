@@ -1,0 +1,16 @@
+{
+    "num_nodes": [1],
+    "gpus_per_node": [1, 2, 4, 8],
+    "gpu_type": ["geforce3090", "a6000", "a100", "h100"],
+    "model": [
+        "pythia-160m",
+        "pythia-410m",
+        "pythia-1b",
+        "pythia-2.8b",
+        "pythia-6.9b"
+    ],
+    "free_lunch": [false],
+    "activation_checkpointing": [false],
+    "sharding": [""],
+    "offloading": [false]
+}

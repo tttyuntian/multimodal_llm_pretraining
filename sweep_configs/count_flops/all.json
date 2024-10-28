@@ -1,0 +1,13 @@
+{
+    "model": [
+        "mamba",
+        "roberta",
+        "pythia-160m",
+        "pythia-410m",
+        "pythia-1b",
+        "pythia-2.8b",
+        "pythia-6.9b",
+        "convnext-xlarge-22k",
+        "vit"
+    ]
+}

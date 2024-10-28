@@ -1,0 +1,12 @@
+{
+    "num_nodes": [1],
+    "gpus_per_node": [4],
+    "gpu_type": ["geforce3090"],
+    "model": [
+        "pythia-160m"
+    ],
+    "free_lunch": [true],
+    "activation_checkpointing": [false, true],
+    "sharding": ["", "zero_1", "zero_2", "zero_3", "fsdp_shard_grad_op", "fsdp_full_shard"],
+    "offloading": [false, true]
+}
