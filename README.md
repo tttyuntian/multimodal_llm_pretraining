@@ -159,11 +159,11 @@ You can checkout a specific release and its artifacts via:
 ```bash
 RELEASE_TAG=arxiv-v1
 
-git clone https://github.com/apoorvkh/academic-pretraining.git --branch ${RELEASE_TAG} --single-branch academic-pretraining-${RELEASE_TAG}
-cd academic-pretraining-${RELEASE_TAG}
+git clone https://github.com/apoorvkh/academic-pretraining.git --branch $RELEASE_TAG --single-branch academic-pretraining-${RELEASE_TAG}
+cd academic-pretraining-$RELEASE_TAG
 
 # download artifacts
-curl -fsSL https://github.com/apoorvkh/academic-pretraining/releases/download/${RELEASE_TAG}/artifacts.tar | tar xvf -
+curl -fsSL https://github.com/apoorvkh/academic-pretraining/releases/download/$RELEASE_TAG/artifacts.tar | tar xvf -
 
 # unpack Tango workspace (many files; may take a few minutes)
 tar xzf artifacts/tango_workspace.tgz
