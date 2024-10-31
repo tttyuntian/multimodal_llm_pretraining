@@ -159,7 +159,7 @@ You can checkout a specific release and its artifacts via:
 ```bash
 RELEASE_TAG=arxiv-v1
 
-git clone https://github.com/apoorvkh/academic-pretraining.git --branch $RELEASE_TAG --single-branch academic-pretraining-${RELEASE_TAG}
+git clone https://github.com/apoorvkh/academic-pretraining.git --branch $RELEASE_TAG --single-branch academic-pretraining-$RELEASE_TAG
 cd academic-pretraining-$RELEASE_TAG
 
 # download artifacts
