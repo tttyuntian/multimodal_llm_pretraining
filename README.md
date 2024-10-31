@@ -11,9 +11,6 @@ Use this repository to:
 
 Refer to [our paper](https://arxiv.org/abs/2410.23261) for further insights about the current state of academic compute, more training times (for several models and GPUs), and for help deciding which GPUs to buy.
 
-> [!NOTE]
-> This repository is written as an abstraction over the [Transformers](https://github.com/huggingface/transformers) and [PyTorch](https://github.com/pytorch/pytorch) libraries (currently pinned to `transformers==4.42.3` and `torch==2.3.1`). We automatically handle all dependencies, multi-node/GPU environments, and experiment caching/execution (with SLURM support). Our codebase should also be easy to extend for new GPUs and models. We plan to continually update this repository with new features. We provide all [artifacts](#artifacts) from our survey and experiments (pinned to previous revisions of our repository/paper).
-
 ## Installation
 
 ```bash
@@ -128,6 +125,9 @@ After your results are computed, you can run our scripts to generate the optimal
 You can add models via [`src/models/__init__.py`](./src/models/__init__.py) and GPUs via [`src/gpus.py`](./src/gpus.py). These should automatically populate in the CLI commands. You should run `pyright` to check for any missing implementations. You should then sanity check simple settings (run `--methods naive` and `--methods free-lunch` in our [benchmark](#run-our-benchmark-on-your-model--hardware)).
 
 ## Miscellaneous
+
+> [!NOTE]
+> This repository is written as an abstraction over the [Transformers](https://github.com/huggingface/transformers) and [PyTorch](https://github.com/pytorch/pytorch) libraries (currently pinned to `transformers==4.42.3` and `torch==2.3.1`). We automatically handle all dependencies, multi-node/GPU environments, and experiment caching/execution (with SLURM support). Our codebase should also be easy to extend for new GPUs and models. We plan to continually update this repository with new features. We provide all [artifacts](#artifacts) from our survey and experiments (pinned to previous revisions of our repository/paper).
 
 ### Caching
 
