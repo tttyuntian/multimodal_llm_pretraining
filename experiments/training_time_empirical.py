@@ -1,18 +1,16 @@
 import dataclasses
 import math
-import os
 import tempfile
 from dataclasses import dataclass
-from typing import Any, Sequence, TypedDict
+from typing import Any, TypedDict
 
 import torch
-import torchrunx
 from src.benchmarking.max_batch_size import find_max_mbs_pow2
 from src.benchmarking.step_time import estimate_step_time
 from src.benchmarking.utils import ManualTrainer
 from tango import Step
 
-from experiments import Experiment, SlurmJob, step
+from experiments import Experiment, SlurmJob, distribute, step
 from experiments.config import TrainingConfig
 
 
@@ -52,13 +50,11 @@ def find_largest_batch_size_worker(config: TrainingConfig, limit: int):
 
 @step(cacheable=True, version="001")
 def find_largest_batch_size(config: TrainingConfig, limit: int) -> int:
-    return torchrunx.launch(
+    return distribute(
         func=find_largest_batch_size_worker,
         func_kwargs={"config": config, "limit": limit},
-        hostnames=torchrunx.slurm_hosts(),
         workers_per_host=config.gpus_per_node,
-        log_dir=os.environ["TORCHRUNX_LOG_DIR"],
-    )[0]
+    )
 
 
 class BenchmarkingResults(TypedDict):
@@ -98,7 +94,7 @@ def benchmark_step_time(
 
     while micro_batch_size > 0:
         try:
-            benchmark_results = torchrunx.launch(
+            benchmark_results = distribute(
                 func=benchmark_step_time_worker,
                 func_kwargs=dict(
                     config=config,
@@ -107,14 +103,12 @@ def benchmark_step_time(
                     target_micro_batch_size=target_micro_batch_size,
                     num_benchmarking_steps=num_benchmarking_steps,
                 ),
-                hostnames=torchrunx.slurm_hosts(),
                 workers_per_host=config.gpus_per_node,
-                log_dir=os.environ["TORCHRUNX_LOG_DIR"],
-            )[0]
+            )
         except RuntimeError:
             if config.free_lunch:
-                print("Possible time-out during compile, trying again without compiling")
-                benchmark_results = torchrunx.launch(
+                print("Possible time-out during compile, trying again without compiling...")
+                benchmark_results = distribute(
                     func=benchmark_step_time_worker,
                     func_kwargs=dict(
                         config=config,
@@ -123,10 +117,8 @@ def benchmark_step_time(
                         target_micro_batch_size=target_micro_batch_size,
                         num_benchmarking_steps=num_benchmarking_steps,
                     ),
-                    hostnames=torchrunx.slurm_hosts(),
                     workers_per_host=config.gpus_per_node,
-                    log_dir=os.environ["TORCHRUNX_LOG_DIR"],
-                )[0]
+                )
             else:
                 raise
 
@@ -144,6 +136,9 @@ def compute_training_days(benchmarking_results: BenchmarkingResults | None, num_
     if benchmarking_results is None:
         return None
     return (num_steps * benchmarking_results["step_time"]) / (24 * 60 * 60)
+
+
+## Experiment
 
 
 @dataclass
@@ -168,23 +163,23 @@ class TrainingTimeEmpirical(Experiment):
             [
                 self.benchmarking_steps <= 0,
                 self.trial < 0,
-                # target batch size should be power of 2
-                not math.log2(self.model_class.batch_size).is_integer(),
-                # target batch size should be evenly divisible by total GPUs
+                # model batch size should be evenly divisible by total GPUs
                 self.model_class.batch_size % (self.config.num_nodes * self.config.gpus_per_node) > 0,
+                # batch size per gpu should be power of 2
+                not math.log2(
+                    self.model_class.batch_size // (self.config.num_nodes * self.config.gpus_per_node)
+                ).is_integer(),
                 # if activation checkpointing is enabled, model should support it
-                (not self.model_class.supports_activation_checkpointing) and self.config.activation_checkpointing,
+                self.config.activation_checkpointing and (not self.model_class.supports_activation_checkpointing),
                 # data types for ampere or newer GPUs
-                (not self.config.ampere_or_newer_gpu() and (self.training_class.tf32 or self.training_class.bf16)),
+                self.model_class.mixed_precision == "bf16" and not self.config.ampere_or_newer_gpu(),
                 # don't shard for a single GPU (no-op)
-                (
-                    self.config.num_nodes == 1
-                    and self.config.gpus_per_node == 1
-                    and self.config.sharding != ""
-                    and not self.config.offloading
-                ),
+                self.config.num_nodes == 1
+                and self.config.gpus_per_node == 1
+                and self.config.sharding != ""
+                and not self.config.offloading,
                 # offloading requires sharding
-                (self.config.sharding == "" and self.config.offloading),
+                (self.config.offloading and self.config.sharding == ""),
             ]
         ):
             return False
@@ -221,10 +216,6 @@ class TrainingTimeEmpirical(Experiment):
             gpus_per_node=self.config.gpus_per_node,
             gpu_type=self.config.gpu_type,
         )
-
-    @property
-    def dependencies(self) -> Sequence[Experiment]:
-        return []
 
     def results(self):
         return {
