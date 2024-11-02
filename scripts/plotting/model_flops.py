@@ -13,13 +13,14 @@ def __():
 
 @app.cell
 def __(CountFlopsSweep):
-    results = CountFlopsSweep(search_space="sweep_configs/count_flops/all.json").results()
+    results = CountFlopsSweep(search_space="experiments/sweep_configs/count_flops/all.json").results()
     return (results,)
 
 
 @app.cell
 def __():
     import math
+
     import polars as pl
 
     return math, pl
