@@ -39,3 +39,38 @@ class DummyImageClassificationDataset(Dataset):
             "pixel_values": self.images[index],
             "labels": self.labels[index],
         }
+
+
+class DummyMultimodalLanguageModelingDataset(Dataset):
+    def __init__(
+        self,
+        vocab_size: int,
+        sequence_length: int,
+        image_size: int,
+        num_samples: int = 20_000,
+        image_token_id: int = 32000,
+    ) -> None:
+        super().__init__()
+        print(f"vocab_size: {vocab_size}")
+        print(f"sequence_length: {sequence_length}")
+        print(f"image_size: {image_size}")
+        print(f"num_samples: {num_samples}")
+        print(f"image_token_id: {image_token_id}")
+        
+        self.attention_mask = torch.ones((num_samples, sequence_length))
+        self.images = torch.rand((num_samples, 3, image_size, image_size))
+        
+        text_input_ids = torch.randint(0, vocab_size, (num_samples, sequence_length))
+        self.input_ids = torch.cat((torch.tensor([image_token_id] * num_samples).unsqueeze(1), text_input_ids), dim=-1)
+        self.labels = copy.deepcopy(self.input_ids)
+
+    def __len__(self):
+        return len(self.input_ids)
+
+    def __getitem__(self, index):
+        return {
+            "attention_mask": self.attention_mask[index],
+            "pixel_values": self.images[index],
+            "input_ids": self.input_ids[index],
+            "labels": self.labels[index],
+        }

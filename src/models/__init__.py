@@ -12,7 +12,7 @@ import torch.optim
 from torch.utils.data import Dataset
 from transformers import PreTrainedModel, SchedulerType
 
-from ..benchmarking.data import DummyImageClassificationDataset, DummyTextModelingDataset
+from ..benchmarking.data import DummyImageClassificationDataset, DummyTextModelingDataset, DummyMultimodalLanguageModelingDataset
 
 ## Define and group model types
 
@@ -37,18 +37,20 @@ ConvNextT = Literal["convnext-large-1k", "convnext-large-22k", "convnext-xlarge-
 
 ViTT = Literal["vit"]
 
+LlavaT = Literal["llava"]
+
 ModelT = Literal[
     RobertaT,
     PythiaT,
     MambaT,
     ConvNextT,
     ViTT,
+    LlavaT,
 ]
 
 ##
 
 T = TypeVar("T", bound=ModelT)
-
 
 class BaseModelClass(ABC, Generic[T]):
     """Define models and hyper-parameters using this class."""
@@ -186,6 +188,34 @@ class VisionModelClass(Generic[T], BaseModelClass[T]):
         return DummyImageClassificationDataset(image_size=self.image_size, num_classes=self.num_classes)
 
 
+class MultimodalModelClass(Generic[T], BaseModelClass[T]):
+    """Extension of BaseModelClass for vision models.
+    Provides dummy dataset implementation for image classification objective."""
+
+    @property
+    @abstractmethod
+    def vocab_size(self) -> int:
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def sequence_length(self) -> int:
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def image_size(self) -> int:
+        raise NotImplementedError
+
+    def load_dummy_dataset(self, sequence_length=512) -> Dataset:
+        """Specific objective for image classification. Could override for other vision objectives."""
+        return DummyMultimodalLanguageModelingDataset(
+            vocab_size=self.vocab_size, 
+            sequence_length=sequence_length, 
+            image_size=self.image_size
+        )
+
+
 def get_model_class(model_type: ModelT) -> BaseModelClass:
     match model_type:
         case "roberta":
@@ -219,6 +249,10 @@ def get_model_class(model_type: ModelT) -> BaseModelClass:
             from .vit import ViTModelClass
 
             return ViTModelClass(model_type)
+        case "llava":
+            from .llava import LlavaModelClass
+
+            return LlavaModelClass(model_type)
 
 
-__all__ = ["ModelT", "BaseModelClass", "LanguageModelClass", "VisionModelClass", "get_model_class"]
+__all__ = ["ModelT", "BaseModelClass", "LanguageModelClass", "VisionModelClass", "MultimodalModelClass", "get_model_class"]
