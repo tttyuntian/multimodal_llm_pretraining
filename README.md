@@ -23,6 +23,14 @@ curl -fsSL https://pixi.sh/install.sh | bash
 # Install project dependencies (may take a few minutes the first time)
 pixi shell
 ```
+## Dependency modification
+```bash
+# upgrade `transformers` from 4.42.3
+pip install -U transformers==4.46.3
+
+# upgrade `accelerate` from 0.32.0
+pip install -U accelerate==0.34.2
+```
 
 ## Activate your virtual environment: `pixi shell`
 
