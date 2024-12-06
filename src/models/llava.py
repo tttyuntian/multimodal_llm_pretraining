@@ -23,6 +23,11 @@ class LlavaModelClass(MultimodalModelClass[LlavaT]):
             text_config=text_config,
         )
         model = LlavaForConditionalGeneration(config) # TODO: check the forward() call and see how to introduce image special token.
+        
+        # Freeze visual encoder's parameters
+        for name, param in model.named_parameters():
+            if name.startswith("vision_tower"):
+                param.requires_grad = False
         return model
 
     @property
@@ -42,7 +47,7 @@ class LlavaModelClass(MultimodalModelClass[LlavaT]):
     def batch_size(self) -> int:
         """Overall batch size. In our scripts, (num_nodes * gpus_per_node * micro_batch_size * grad_acc_steps)
         always equals batch_size."""
-        return 2
+        return 256
 
     @property
     def training_steps(self) -> int:
@@ -52,7 +57,7 @@ class LlavaModelClass(MultimodalModelClass[LlavaT]):
     @property
     def mixed_precision(self) -> Literal[None, "bf16", "fp16"]:
         """Whether to used mixed precision. None if only fp32 precision."""
-        return "bf16"
+        return None
 
     @property
     def optimizer(self) -> type[torch.optim.Optimizer]:
