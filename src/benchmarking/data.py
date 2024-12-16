@@ -19,7 +19,7 @@ def process_conversations(conversations):
     
     return results
 
-def load_LLava_data(path_to_data, split="pretrain"): # split = pretrain / finetune
+def load_LLava_data(path_to_data, split="pretrain"): # split = pretrain / instruction
     if split == "pretrain":
         with open(os.path.join(path_to_data,"blip_laion_cc_sbu_558k.json"), "r") as f:
             llava_data = json.load(f)
@@ -31,8 +31,20 @@ def load_LLava_data(path_to_data, split="pretrain"): # split = pretrain / finetu
             llava_data[i]["image"] = Image.open(os.path.join(path_to_data, "images" ,llava_data[i]["image"]))
             llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
 
+    elif split == "instruction":
+
+        with open(os.path.join(path_to_data,"llava_v1_5_mix665k.json"), "r") as f:
+            llava_data = json.load(f)
+        
+        # llava_data = llava_data[:5000]
+
+        for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
+            # load the actual images
+            llava_data[i]["image"] = Image.open(os.path.join(path_to_data ,llava_data[i]["image"]))
+            llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
+
     else:
-        raise NotImplementedError("instruction tuning data not implemented")
+        raise NotImplementedError("data split not implemented")
 
     return llava_data
 
@@ -123,7 +135,41 @@ class LlavaPretrainingDataset(Dataset):
         )
         self.processor.tokenizer.add_tokens("<image>") # add the new `<image>` token
 
-        self._all_data = load_LLava_data(path_to_llava_pretrain_data)
+        self._all_data = load_LLava_data(path_to_llava_pretrain_data, split="pretrain")
+        
+    def __len__(self):
+        return len(self._all_data)
+
+    def __getitem__(self, index):
+
+        sample = self.processor(
+            images=self._all_data[index]["image"], 
+            text=self.processor.tokenizer.apply_chat_template(
+                self._all_data[index]["conversations"], 
+                tokenize=False)
+            )
+
+        sample['labels'] = copy.deepcopy(sample["input_ids"])
+
+        return sample
+
+
+
+class LlavaInstructionTuningDataset(Dataset):
+    def __init__(
+        self,
+        path_to_llava_it_data = "/gpfs/data/superlab/datasets/LLaVA-Instruction"
+    ) -> None:
+        super().__init__()
+
+        # Instantiate the LlavaProcessor specific to our models
+        self.processor = LlavaProcessor(
+            tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B-Instruct"),
+            image_processor = AutoProcessor.from_pretrained("openai/clip-vit-large-patch14-336").image_processor
+        )
+        self.processor.tokenizer.add_tokens("<image>") # add the new `<image>` token
+
+        self._all_data = load_LLava_data(path_to_llava_it_data, split="instruction")
         
     def __len__(self):
         return len(self._all_data)
