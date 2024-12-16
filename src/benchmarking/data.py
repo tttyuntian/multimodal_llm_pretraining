@@ -1,7 +1,40 @@
 import copy
+import json
+from PIL import Image
+import os
+from tqdm import tqdm
 
 import torch
 from torch.utils.data import Dataset
+
+from transformers import AutoTokenizer, AutoProcessor, LlavaProcessor
+
+def process_conversations(conversations):
+    results = []
+    for line in conversations:
+        results.append({
+            "role": "assistant" if line["from"] == "gpt" else "user",
+            "content": line["value"]
+        })
+    
+    return results
+
+def load_LLava_data(path_to_data, split="pretrain"): # split = pretrain / finetune
+    if split == "pretrain":
+        with open(os.path.join(path_to_data,"blip_laion_cc_sbu_558k.json"), "r") as f:
+            llava_data = json.load(f)
+
+        # llava_data = llava_data[:5000]
+
+        for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
+            # load the actual images
+            llava_data[i]["image"] = Image.open(os.path.join(path_to_data, "images" ,llava_data[i]["image"]))
+            llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
+
+    else:
+        raise NotImplementedError("instruction tuning data not implemented")
+
+    return llava_data
 
 
 class DummyTextModelingDataset(Dataset):
@@ -74,3 +107,36 @@ class DummyMultimodalLanguageModelingDataset(Dataset):
             "input_ids": self.input_ids[index],
             "labels": self.labels[index],
         }
+
+
+class LlavaPretrainingDataset(Dataset):
+    def __init__(
+        self,
+        path_to_llava_pretrain_data = "/gpfs/data/superlab/datasets/LLaVA-Pretrain"
+    ) -> None:
+        super().__init__()
+
+        # Instantiate the LlavaProcessor specific to our models
+        self.processor = LlavaProcessor(
+            tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B-Instruct"),
+            image_processor = AutoProcessor.from_pretrained("openai/clip-vit-large-patch14-336").image_processor
+        )
+        self.processor.tokenizer.add_tokens("<image>") # add the new `<image>` token
+
+        self._all_data = load_LLava_data(path_to_llava_pretrain_data)
+        
+    def __len__(self):
+        return len(self._all_data)
+
+    def __getitem__(self, index):
+
+        sample = self.processor(
+            images=self._all_data[index]["image"], 
+            text=self.processor.tokenizer.apply_chat_template(
+                self._all_data[index]["conversations"], 
+                tokenize=False)
+            )
+
+        sample['labels'] = copy.deepcopy(sample["input_ids"])
+
+        return sample

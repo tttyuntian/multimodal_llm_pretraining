@@ -11,6 +11,9 @@ from transformers import (
     SchedulerType,
 )
 
+from transformers import AutoTokenizer, AutoProcessor
+
+
 from . import LlavaT, MultimodalModelClass
 
 
@@ -28,6 +31,19 @@ class LlavaModelClass(MultimodalModelClass[LlavaT]):
         for name, param in model.named_parameters():
             if name.startswith("vision_tower"):
                 param.requires_grad = False
+
+
+        # add a new <image> token and change the config.image_token_index to that new token
+        processor = LlavaProcessor(
+            tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B-Instruct"),
+            image_processor = AutoProcessor.from_pretrained("openai/clip-vit-large-patch14-336").image_processor
+        )
+
+        processor.tokenizer.add_tokens("<image>")
+
+        model.resize_token_embeddings(len(processor.tokenizer)) # need this to avoid cuda error
+        model.config.image_token_index = processor.tokenizer.encode("<image>", add_special_tokens=False)[0]
+
         return model
 
     @property
