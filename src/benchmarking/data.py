@@ -121,10 +121,11 @@ class DummyMultimodalLanguageModelingDataset(Dataset):
         }
 
 
-class LlavaPretrainingDataset(Dataset):
+class LlavaDataset(Dataset):
     def __init__(
         self,
-        path_to_llava_pretrain_data = "/gpfs/data/superlab/datasets/LLaVA-Pretrain"
+        path_to_llava_data = "/gpfs/data/superlab/datasets/LLaVA-Pretrain",
+        split = "pretrain" # pretrain or instruction
     ) -> None:
         super().__init__()
 
@@ -135,54 +136,56 @@ class LlavaPretrainingDataset(Dataset):
         )
         self.processor.tokenizer.add_tokens("<image>") # add the new `<image>` token
 
-        self._all_data = load_LLava_data(path_to_llava_pretrain_data, split="pretrain")
+        self._all_data = load_LLava_data(path_to_llava_data, split=split)
         
     def __len__(self):
         return len(self._all_data)
 
     def __getitem__(self, index):
 
-        sample = self.processor(
-            images=self._all_data[index]["image"], 
-            text=self.processor.tokenizer.apply_chat_template(
-                self._all_data[index]["conversations"], 
-                tokenize=False)
-            )
-
-        sample['labels'] = copy.deepcopy(sample["input_ids"])
-
-        return sample
+        return {
+            "image": self._all_data[index]["image"],
+            "conversations" : self._all_data[index]["conversations"]
+        }
 
 
+def llava_collate_fn(batch, processor):
+    """
+    Custom collate function to preprocess images and tokenize text in batches.
 
-class LlavaInstructionTuningDataset(Dataset):
-    def __init__(
-        self,
-        path_to_llava_it_data = "/gpfs/data/superlab/datasets/LLaVA-Instruction"
-    ) -> None:
-        super().__init__()
+    Args:
+        batch (list): A list of samples, where each sample is a dictionary
+                      with keys "image" and "conversations".
+        processor (LlavaProcessor): LlavaProcessor to process images and text.
 
-        # Instantiate the LlavaProcessor specific to our models
-        self.processor = LlavaProcessor(
-            tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B-Instruct"),
-            image_processor = AutoProcessor.from_pretrained("openai/clip-vit-large-patch14-336").image_processor
-        )
-        self.processor.tokenizer.add_tokens("<image>") # add the new `<image>` token
+    Returns:
+        dict: A batch dictionary containing processed "pixel_values", "input_ids", and "labels".
+    """
+    # Extract images and conversations from the batch
+    images = [item["image"] for item in batch]
+    conversations = [item["conversations"] for item in batch]
 
-        self._all_data = load_LLava_data(path_to_llava_it_data, split="instruction")
-        
-    def __len__(self):
-        return len(self._all_data)
+    # Process images
+    processed_images = processor.image_processor(images, return_tensors="pt")
 
-    def __getitem__(self, index):
+    # Tokenize text using the processor's chat template
+    tokenized_texts = [
+        processor.tokenizer.apply_chat_template(conv, tokenize=False)
+        for conv in conversations
+    ]
+    tokenized_batch = processor.tokenizer(
+        tokenized_texts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True
+    )
 
-        sample = self.processor(
-            images=self._all_data[index]["image"], 
-            text=self.processor.tokenizer.apply_chat_template(
-                self._all_data[index]["conversations"], 
-                tokenize=False)
-            )
+    # Create labels (deep copy of input_ids)
+    labels = tokenized_batch.input_ids.clone()
 
-        sample['labels'] = copy.deepcopy(sample["input_ids"])
-
-        return sample
+    return {
+        "pixel_values": processed_images["pixel_values"],
+        "input_ids": tokenized_batch.input_ids,
+        "attention_mask": tokenized_batch.attention_mask,
+        "labels": labels
+    }
