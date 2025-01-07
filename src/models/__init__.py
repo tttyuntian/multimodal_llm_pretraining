@@ -212,7 +212,8 @@ class MultimodalModelClass(Generic[T], BaseModelClass[T]):
         return DummyMultimodalLanguageModelingDataset(
             vocab_size=self.vocab_size, 
             sequence_length=sequence_length, 
-            image_size=self.image_size
+            image_size=self.image_size,
+            image_token_id=self.image_token_index,
         )
 
 

@@ -129,6 +129,7 @@ class LlavaDataset(Dataset):
     ) -> None:
         super().__init__()
 
+        # TODO: Remove LlavaProcessor
         # Instantiate the LlavaProcessor specific to our models
         self.processor = LlavaProcessor(
             tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B-Instruct"),

@@ -11,7 +11,7 @@ from transformers import (
     SchedulerType,
 )
 
-from transformers import AutoTokenizer, AutoProcessor
+from transformers import AutoTokenizer, AutoProcessor, LlavaProcessor
 
 
 from . import LlavaT, MultimodalModelClass
@@ -44,7 +44,12 @@ class LlavaModelClass(MultimodalModelClass[LlavaT]):
         model.resize_token_embeddings(len(processor.tokenizer)) # need this to avoid cuda error
         model.config.image_token_index = processor.tokenizer.encode("<image>", add_special_tokens=False)[0]
 
+        self.set_image_token_index(model.config.image_token_index)
+
         return model
+
+    def set_image_token_index(self, image_token_index):
+        self.image_token_index = image_token_index
 
     @property
     def supports_activation_checkpointing(self) -> bool:
