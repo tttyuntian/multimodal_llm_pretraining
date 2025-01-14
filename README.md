@@ -23,14 +23,6 @@ curl -fsSL https://pixi.sh/install.sh | bash
 # Install project dependencies (may take a few minutes the first time)
 pixi shell
 ```
-## Dependency modification
-```bash
-# upgrade `transformers` from 4.42.3
-pip install -U transformers==4.46.3
-
-# upgrade `accelerate` from 0.32.0
-pip install -U accelerate==0.34.2
-```
 
 ## Activate your virtual environment: `pixi shell`
 
@@ -78,55 +70,65 @@ After your results are computed, you can run our scripts to generate the optimal
 ```
 </details>
 
-<details><summary><code>python scripts/print_huggingface_arguments.py --num-nodes 1 --gpus-per-node 4 --gpu-type a100 --model pythia-1b --free-lunch --sharding zero_1 --micro-batch-size 16 --gradient-accumulation-steps 16</code></summary>
+<details><summary><code>python scripts/to_training_arguments.py --output artifacts/training_arguments.json --num-nodes 1 --gpus-per-node 4 --gpu-type a100 --model pythia-1b --free-lunch --sharding zero_1 --micro-batch-size 16 --gradient-accumulation-steps 16</code></summary>
 
-```python
-# Dictionary of transformers.TrainingArguments
+`artifacts/training_arguments.json`
 
+```json
 {
-    "bf16": True,
-    "ddp_find_unused_parameters": False,
+    "max_steps": 143000,
+    "per_device_train_batch_size": 16,
+    "gradient_accumulation_steps": 16,
+    "lr_scheduler_type": "cosine_with_min_lr",
+    "lr_scheduler_kwargs": {
+        "min_lr_rate": 0.1
+    },
+    "warmup_steps": 1430,
+    "gradient_checkpointing": false,
+    "bf16": true,
+    "fp16": false,
+    "tf32": true,
+    "fsdp": "",
+    "fsdp_config": null,
     "deepspeed": {
         "fp16": {
             "enabled": "auto",
-            "hysteresis": 2,
-            "initial_scale_power": 16,
             "loss_scale": 0,
             "loss_scale_window": 1000,
-            "min_loss_scale": 1,
+            "initial_scale_power": 16,
+            "hysteresis": 2,
+            "min_loss_scale": 1
         },
         "gradient_accumulation_steps": "auto",
         "gradient_clipping": "auto",
-        "optimizer": {
-            "params": {
-                "adam_w_mode": False,
-                "betas": "auto",
-                "eps": "auto",
-                "lr": "auto",
-                "weight_decay": "auto",
-            },
-            "type": "Adam",
-        },
         "train_batch_size": "auto",
         "train_micro_batch_size_per_gpu": "auto",
-        "zero_optimization": {"stage": 1},
+        "optimizer": {
+            "type": "Adam",
+            "params": {
+                "lr": "auto",
+                "betas": "auto",
+                "eps": "auto",
+                "weight_decay": "auto",
+                "adam_w_mode": false
+            }
+        },
+        "zero_optimization": {
+            "stage": 1
+        }
     },
-    "fp16": False,
-    "fsdp": "",
-    "fsdp_config": None,
-    "gradient_accumulation_steps": 16,
-    "gradient_checkpointing": False,
-    "lr_scheduler_kwargs": {"min_lr_rate": 0.1},
-    "lr_scheduler_type": "cosine_with_min_lr",
-    "max_grad_norm": 1.0,
-    "max_steps": 143000,
-    "per_device_train_batch_size": 16,
-    "tf32": True,
-    "torch_compile": True,
-    "warmup_steps": 1430,
+    "ddp_find_unused_parameters": false,
+    "torch_compile": true,
+    "max_grad_norm": 1.0
 }
 ```
 </details>
+
+## Training script
+
+We provide a boilerplate training script that can be used to train models using arguments from the above steps. This script operates using `transformers.Trainer` and works with our codebase, but can be customized further or migrated to your own project (after copying in necessary code). This script loads a dummy dataset, which you should change to one of your own interest. This script automatically runs multi-GPU training in the local (or SLURM) environment: this behavior can be further customized using the [torchrunx](https://torchrunx.readthedocs.io/stable) `--launcher` CLI arguments.
+
+For example: `python scripts/training.py --output-dir output --model-type pythia-410m --training-arguments artifacts/training_arguments.json`
 
 ## Extending this codebase
 
@@ -155,7 +157,13 @@ marimo edit scripts/plotting/optimal_table.py
 
 ## Artifacts
 
-We provide all artifacts from our paper and experiments as `artifacts.tar` in [Releases](https://github.com/apoorvkh/academic-pretraining/releases). Our artifacts include:
+We provide all artifacts from our paper and experiments as `artifacts.tar` under certain [releases](https://github.com/apoorvkh/academic-pretraining/releases).
+
+| Paper Revision | Release Tag |
+| --- | --- |
+| [arxiv-v1](https://arxiv.org/abs/2410.23261v1) | v1.0.0 |
+
+Our artifacts include:
 
 - anonymized results from our survey (`artifacts/survey.csv`)
 - the [Tango](http://ai2-tango.readthedocs.io) workspace (`artifacts/tango_workspace.tgz`) with cached results from all our experiments
@@ -165,7 +173,7 @@ You can exactly reproduce all plots in our paper ([#plotting](#plotting)) using 
 You can checkout a specific release and its artifacts via:
 
 ```bash
-RELEASE_TAG=arxiv-v1
+RELEASE_TAG=v1.0.0
 
 git clone https://github.com/apoorvkh/academic-pretraining.git --branch $RELEASE_TAG --single-branch academic-pretraining-$RELEASE_TAG
 cd academic-pretraining-$RELEASE_TAG
@@ -178,8 +186,6 @@ tar xzf artifacts/tango_workspace.tgz
 ```
 
 ## Citation
-
-If you use our codebase in your work, please cite:
 
 ```bibtex
 @misc{khandelwal2024:100k,
