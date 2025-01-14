@@ -70,39 +70,23 @@ class TrainingClass:
             os.environ["NCCL_P2P_DISABLE"] = "1"
             os.environ["NCCL_IB_DISABLE"] = "1"
 
-        return self.trainer_cls(
-            model=model,
-            args=self.to_huggingface_args(**hf_training_args_overrides),
-            train_dataset=train_dataset,
-            **hf_trainer_kwargs_overrides,
-        )
-
-    @property
-    def trainer_cls(self) -> type[Trainer]:
-        # If using Deepspeed, use Deepspeed's Adam optimizer
-        if self.zero_stage != "0" and self.optimizer in [torch.optim.Adam, torch.optim.AdamW]:
-            return Trainer
+        optimizer_cls_and_kwargs = (self.optimizer, self.optimizer_kwargs)
 
         # TODO: For now PyTorch fused Adam optimizer seems to break often
         # if self.optimizer in [torch.optim.Adam, torch.optim.AdamW]
         # self.optimizer_kwargs["fused"] = True
 
-        class CustomOptimizerTrainer(Trainer):
-            @staticmethod
-            def get_optimizer_cls_and_kwargs(
-                args: TrainingArguments, model=None
-            ) -> tuple[type[torch.optim.Optimizer], dict[str, Any]]:
-                return self.optimizer, self.optimizer_kwargs
+        # If using Deepspeed, use Deepspeed's Adam optimizer
+        if self.zero_stage != "0" and self.optimizer in [torch.optim.Adam, torch.optim.AdamW]:
+            optimizer_cls_and_kwargs = None
 
-            # Can remove this after transformers==4.43.0
-            def create_optimizer(self):
-                trainer_get_optimizer_fn = Trainer.get_optimizer_cls_and_kwargs
-                Trainer.get_optimizer_cls_and_kwargs = self.get_optimizer_cls_and_kwargs
-                optimizer = super().create_optimizer()
-                Trainer.get_optimizer_cls_and_kwargs = trainer_get_optimizer_fn
-                return optimizer
-
-        return CustomOptimizerTrainer
+        return Trainer(
+            model=model,
+            args=self.to_huggingface_args(**hf_training_args_overrides),
+            train_dataset=train_dataset,
+            optimizer_cls_and_kwargs=optimizer_cls_and_kwargs,
+            **hf_trainer_kwargs_overrides,
+        )
 
     def to_huggingface_args(self, **hf_training_args_overrides) -> TrainingArguments:
         return TrainingArguments(**self._to_huggingface_args_dict(**hf_training_args_overrides))
@@ -111,16 +95,10 @@ class TrainingClass:
         fsdp_options, fsdp_config = self._build_fsdp_config()
         ds_config = self._build_deepspeed_config()
 
-        gradient_checkpointing = self.gradient_checkpointing
-
         # DDPOptimizer + activation checkpointing not supported
         # [https://github.com/pytorch/pytorch/issues/104674]
-        if gradient_checkpointing:
+        if self.gradient_checkpointing:
             torch._dynamo.config.optimize_ddp = False
-
-        # should not checkpoint in both FSDP and HF Trainer
-        if (fsdp_config or {}).get("activation_checkpointing", False):
-            gradient_checkpointing = False
 
         scheduler_warmup_steps = self.scheduler_kwargs.pop("num_warmup_steps", 0)
 
@@ -131,7 +109,7 @@ class TrainingClass:
             lr_scheduler_type=self.scheduler_type.value,
             lr_scheduler_kwargs=self.scheduler_kwargs,
             warmup_steps=scheduler_warmup_steps,
-            gradient_checkpointing=gradient_checkpointing,
+            gradient_checkpointing=self.gradient_checkpointing,
             bf16=self.bf16,
             fp16=self.fp16,
             tf32=self.tf32,
@@ -154,11 +132,13 @@ class TrainingClass:
             fsdp_options += [FSDPOption.OFFLOAD]
         fsdp_config = {
             "transformer_layer_cls_to_wrap": self.fsdp_layers_to_wrap,
-            "activation_checkpointing": self.gradient_checkpointing,
         }
         return fsdp_options, fsdp_config
 
     def _build_deepspeed_config(self) -> dict | None:
+        if self.zero_stage == "0":
+            return None
+
         config = {
             "fp16": {
                 "enabled": "auto",
@@ -187,8 +167,6 @@ class TrainingClass:
             }
 
         match self.zero_stage:
-            case "0":
-                return None
             case "1":
                 config["zero_optimization"] = {"stage": 1}
             case "2":

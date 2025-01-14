@@ -1,52 +1,8 @@
 import copy
-import json
-from PIL import Image
-import os
-from tqdm import tqdm
+
 
 import torch
 from torch.utils.data import Dataset
-
-from transformers import AutoTokenizer, AutoProcessor, LlavaProcessor
-
-def process_conversations(conversations):
-    results = []
-    for line in conversations:
-        results.append({
-            "role": "assistant" if line["from"] == "gpt" else "user",
-            "content": line["value"]
-        })
-    
-    return results
-
-def load_LLava_data(path_to_data, split="pretrain"): # split = pretrain / instruction
-    if split == "pretrain":
-        with open(os.path.join(path_to_data,"blip_laion_cc_sbu_558k.json"), "r") as f:
-            llava_data = json.load(f)
-
-        # llava_data = llava_data[:5000]
-
-        for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
-            # load the actual images
-            llava_data[i]["image"] = Image.open(os.path.join(path_to_data, "images" ,llava_data[i]["image"]))
-            llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
-
-    elif split == "instruction":
-
-        with open(os.path.join(path_to_data,"llava_v1_5_mix665k.json"), "r") as f:
-            llava_data = json.load(f)
-        
-        # llava_data = llava_data[:5000]
-
-        for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
-            # load the actual images
-            llava_data[i]["image"] = Image.open(os.path.join(path_to_data ,llava_data[i]["image"]))
-            llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
-
-    else:
-        raise NotImplementedError("data split not implemented")
-
-    return llava_data
 
 
 class DummyTextModelingDataset(Dataset):
@@ -119,74 +75,3 @@ class DummyMultimodalLanguageModelingDataset(Dataset):
             "input_ids": self.input_ids[index],
             "labels": self.labels[index],
         }
-
-
-class LlavaDataset(Dataset):
-    def __init__(
-        self,
-        path_to_llava_data = "/gpfs/data/superlab/datasets/LLaVA-Pretrain",
-        split = "pretrain" # pretrain or instruction
-    ) -> None:
-        super().__init__()
-
-        # TODO: Remove LlavaProcessor
-        # Instantiate the LlavaProcessor specific to our models
-        self.processor = LlavaProcessor(
-            tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B-Instruct"),
-            image_processor = AutoProcessor.from_pretrained("openai/clip-vit-large-patch14-336").image_processor
-        )
-        self.processor.tokenizer.add_tokens("<image>") # add the new `<image>` token
-
-        self._all_data = load_LLava_data(path_to_llava_data, split=split)
-        
-    def __len__(self):
-        return len(self._all_data)
-
-    def __getitem__(self, index):
-
-        return {
-            "image": self._all_data[index]["image"],
-            "conversations" : self._all_data[index]["conversations"]
-        }
-
-
-def llava_collate_fn(batch, processor):
-    """
-    Custom collate function to preprocess images and tokenize text in batches.
-
-    Args:
-        batch (list): A list of samples, where each sample is a dictionary
-                      with keys "image" and "conversations".
-        processor (LlavaProcessor): LlavaProcessor to process images and text.
-
-    Returns:
-        dict: A batch dictionary containing processed "pixel_values", "input_ids", and "labels".
-    """
-    # Extract images and conversations from the batch
-    images = [item["image"] for item in batch]
-    conversations = [item["conversations"] for item in batch]
-
-    # Process images
-    processed_images = processor.image_processor(images, return_tensors="pt")
-
-    # Tokenize text using the processor's chat template
-    tokenized_texts = [
-        processor.tokenizer.apply_chat_template(conv, tokenize=False)
-        for conv in conversations
-    ]
-    tokenized_batch = processor.tokenizer(
-        tokenized_texts,
-        return_tensors="pt",
-        padding=True,
-        truncation=True
-    )
-
-    # Create labels (deep copy of input_ids)
-    labels = tokenized_batch.input_ids.clone()
-
-    return {
-        "pixel_values": processed_images["pixel_values"],
-        "input_ids": tokenized_batch.input_ids,
-        "attention_mask": tokenized_batch.attention_mask,
-        "labels": labels
-    }

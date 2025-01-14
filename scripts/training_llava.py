@@ -16,8 +16,20 @@ def get_model(model_type: ModelT) -> PreTrainedModel:
     return get_model_class(model_type).build_model(use_custom_kernels=True)
 
 
-def get_dataset(model_type: ModelT) -> Dataset:
-    return get_model_class(model_type).load_dummy_dataset()
+def get_dataset(model_type: ModelT, data_path: Path, data_split: str) -> Dataset:
+    from src.data.llava_data import LlavaDataset
+    return LlavaDataset(
+        path_to_llava_data=data_path,
+        split=data_split,
+    )
+
+
+def get_data_collator(model_type: ModelT):
+    if model_type == "llava":
+        from src.data.llava_data import LlavaCollator
+        return LlavaCollator()
+    else:
+        raise NotImplementedError(f"{model_type} has no data collator implemented yet.")
 
 
 def get_optimizer_cls_and_kwargs(
@@ -34,13 +46,20 @@ def get_optimizer_cls_and_kwargs(
     return (model_class.optimizer, model_class.optimizer_kwargs)
 
 
-def train(output_dir: str, model_type: ModelT, training_arguments: dict[str, Any]):
+def train(
+    output_dir: str, 
+    model_type: ModelT, 
+    training_arguments: dict[str, Any],
+    data_path: Path,
+    data_split: str,
+):
     if check_cuda_p2p_ib_support() is False:
         os.environ["NCCL_P2P_DISABLE"] = "1"
         os.environ["NCCL_IB_DISABLE"] = "1"
 
     model = get_model(model_type)
-    train_dataset = get_dataset(model_type)
+    train_dataset = get_dataset(model_type, data_path, data_split)
+    data_collator = get_data_collator(model_type)
     optimizer_cls_and_kwargs = get_optimizer_cls_and_kwargs(
         model_type, using_deepspeed=(training_arguments.get("deepspeed") is not None)
     )
@@ -51,6 +70,7 @@ def train(output_dir: str, model_type: ModelT, training_arguments: dict[str, Any
             output_dir=output_dir,
             **training_arguments,
         ),
+        data_collator=data_collator,
         train_dataset=train_dataset,
         optimizer_cls_and_kwargs=optimizer_cls_and_kwargs,
     )
@@ -58,7 +78,14 @@ def train(output_dir: str, model_type: ModelT, training_arguments: dict[str, Any
     trainer.train()
 
 
-def run(launcher: torchrunx.Launcher, output_dir: str, model_type: ModelT, training_arguments: Path):
+def run(
+    launcher: torchrunx.Launcher, 
+    output_dir: str, 
+    model_type: ModelT, 
+    training_arguments: Path, 
+    data_path: Path, 
+    data_split: str,
+):
     training_arguments = json.load(open(training_arguments, "r"))
     launcher.run(
         func=train,
@@ -66,6 +93,8 @@ def run(launcher: torchrunx.Launcher, output_dir: str, model_type: ModelT, train
             output_dir=output_dir,
             model_type=model_type,
             training_arguments=training_arguments,
+            data_path=data_path,
+            data_split=data_split,
         ),
     )
 
