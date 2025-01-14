@@ -12,8 +12,8 @@ from torch.utils.data import Dataset
 from transformers import PreTrainedModel, Trainer, TrainingArguments
 
 
-def get_model(model_type: ModelT) -> PreTrainedModel:
-    return get_model_class(model_type).build_model(use_custom_kernels=True)
+def get_model(model_type: ModelT, phase: int) -> PreTrainedModel:
+    return get_model_class(model_type).build_model(phase, use_custom_kernels=True)
 
 
 def get_dataset(model_type: ModelT, data_path: Path, data_split: str) -> Dataset:
@@ -52,14 +52,17 @@ def train(
     training_arguments: dict[str, Any],
     data_path: Path,
     data_split: str,
+    phase: int,
 ):
     if check_cuda_p2p_ib_support() is False:
         os.environ["NCCL_P2P_DISABLE"] = "1"
         os.environ["NCCL_IB_DISABLE"] = "1"
 
-    model = get_model(model_type)
+    model = get_model(model_type, phase)
     train_dataset = get_dataset(model_type, data_path, data_split)
+    print(train_dataset.__getitem__(0), flush=True)
     data_collator = get_data_collator(model_type)
+
     optimizer_cls_and_kwargs = get_optimizer_cls_and_kwargs(
         model_type, using_deepspeed=(training_arguments.get("deepspeed") is not None)
     )
@@ -69,6 +72,7 @@ def train(
         args=TrainingArguments(
             output_dir=output_dir,
             **training_arguments,
+            dataloader_num_workers=1,
         ),
         data_collator=data_collator,
         train_dataset=train_dataset,
@@ -85,6 +89,7 @@ def run(
     training_arguments: Path, 
     data_path: Path, 
     data_split: str,
+    phase: int,
 ):
     training_arguments = json.load(open(training_arguments, "r"))
     launcher.run(
@@ -95,6 +100,7 @@ def run(
             training_arguments=training_arguments,
             data_path=data_path,
             data_split=data_split,
+            phase=phase,
         ),
     )
 

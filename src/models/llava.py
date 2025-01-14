@@ -18,7 +18,7 @@ from . import LlavaT, MultimodalModelClass
 
 
 class LlavaModelClass(MultimodalModelClass[LlavaT]):
-    def build_model(self, use_custom_kernels: bool = True) -> PreTrainedModel:
+    def build_model(self, phase: int, use_custom_kernels: bool = True) -> PreTrainedModel:
         vision_config = CLIPVisionConfig.from_pretrained("openai/clip-vit-large-patch14-336")
         text_config = AutoConfig.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
         config = LlavaConfig(
@@ -28,10 +28,16 @@ class LlavaModelClass(MultimodalModelClass[LlavaT]):
         model = LlavaForConditionalGeneration(config) # TODO: check the forward() call and see how to introduce image special token.
         
         # Freeze visual encoder's parameters
-        for name, param in model.named_parameters():
-            if name.startswith("vision_tower"):
-                param.requires_grad = False
-
+        if phase == 1:
+            for name, param in model.named_parameters():
+                if name.startswith("vision_tower") or name.startswith("language_model"):
+                    param.requires_grad = False
+        elif phase == 2:
+            for name, param in model.named_parameters():
+                if name.startswith("vision_tower"):
+                    param.requires_grad = False
+        num_trainable_params = self.get_num_trainable_params(model)
+        print(f"num_trainable_params: {num_trainable_params}")
 
         # add a new <image> token and change the config.image_token_index to that new token
         processor = LlavaProcessor(
@@ -47,6 +53,9 @@ class LlavaModelClass(MultimodalModelClass[LlavaT]):
         self.set_image_token_index(model.config.image_token_index)
 
         return model
+
+    def get_num_trainable_params(self, model):
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     def set_image_token_index(self, image_token_index):
         self.image_token_index = image_token_index

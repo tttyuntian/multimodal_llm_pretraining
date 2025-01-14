@@ -18,6 +18,36 @@ def process_conversations(conversations):
     return results
 
 
+def load_llava_data(path_to_data, split="pretrain"): # split = pretrain / instruction
+    if split == "pretrain":
+        with open(os.path.join(path_to_data,"blip_laion_cc_sbu_558k.json"), "r") as f:
+            llava_data = json.load(f)
+
+        llava_data = llava_data[:5000]  # TODO: remove
+
+        for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
+            # load the actual images
+            llava_data[i]["image"] = Image.open(os.path.join(path_to_data, "images", llava_data[i]["image"]))
+            llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
+
+    elif split == "instruction":
+
+        with open(os.path.join(path_to_data,"llava_v1_5_mix665k.json"), "r") as f:
+            llava_data = json.load(f)
+        
+        llava_data = llava_data[:5000]  # TODO: remove
+
+        for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
+            # load the actual images
+            llava_data[i]["image"] = Image.open(os.path.join(path_to_data, llava_data[i]["image"]))
+            llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
+
+    else:
+        raise NotImplementedError("data split not implemented")
+
+    return llava_data
+
+
 # def load_llava_data(path_to_data, split="pretrain"): # split = pretrain / instruction
 #     if split == "pretrain":
 #         with open(os.path.join(path_to_data,"blip_laion_cc_sbu_558k.json"), "r") as f:
@@ -27,7 +57,7 @@ def process_conversations(conversations):
 
 #         for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
 #             # load the actual images
-#             llava_data[i]["image"] = Image.open(os.path.join(path_to_data, "images", llava_data[i]["image"]))
+#             llava_data[i]["image_path"] = os.path.join(path_to_data, "images", llava_data[i]["image"])
 #             llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
 
 #     elif split == "instruction":
@@ -39,43 +69,13 @@ def process_conversations(conversations):
 
 #         for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
 #             # load the actual images
-#             llava_data[i]["image"] = Image.open(os.path.join(path_to_data, llava_data[i]["image"]))
+#             llava_data[i]["image_path"] = os.path.join(path_to_data, llava_data[i]["image"])
 #             llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
 
 #     else:
 #         raise NotImplementedError("data split not implemented")
 
 #     return llava_data
-
-
-def load_llava_data(path_to_data, split="pretrain"): # split = pretrain / instruction
-    if split == "pretrain":
-        with open(os.path.join(path_to_data,"blip_laion_cc_sbu_558k.json"), "r") as f:
-            llava_data = json.load(f)
-
-        # llava_data = llava_data[:5000]  # TODO: remove
-
-        for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
-            # load the actual images
-            llava_data[i]["image_path"] = os.path.join(path_to_data, "images", llava_data[i]["image"])
-            llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
-
-    elif split == "instruction":
-
-        with open(os.path.join(path_to_data,"llava_v1_5_mix665k.json"), "r") as f:
-            llava_data = json.load(f)
-        
-        # llava_data = llava_data[:5000]  # TODO: remove
-
-        for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
-            # load the actual images
-            llava_data[i]["image_path"] = os.path.join(path_to_data, llava_data[i]["image"])
-            llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
-
-    else:
-        raise NotImplementedError("data split not implemented")
-
-    return llava_data
 
 
 
@@ -92,12 +92,13 @@ class LlavaDataset(Dataset):
         return len(self._all_data)
 
     def get_image(self, idx):
-        return Image.open(self._all_data[idx]["image_path"])
+        # return Image.open(self._all_data[idx]["image_path"])
+        return self._all_data[idx]["image"]
 
     def __getitem__(self, idx):
         return {
             "image": self.get_image(idx),
-            "conversations" : self._all_data[idx]["conversations"],
+            "conversations": self._all_data[idx]["conversations"],
         }
 
 
@@ -107,6 +108,8 @@ class LlavaCollator:
             tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B-Instruct"),
             image_processor = AutoProcessor.from_pretrained("openai/clip-vit-large-patch14-336").image_processor
         )
+        self.processor.tokenizer.pad_token = self.processor.tokenizer.eos_token
+        self.processor.tokenizer.pad_token_id = self.processor.tokenizer.eos_token_id
         self.processor.tokenizer.add_tokens("<image>") # add the new `<image>` token
 
     def __call__(self, features, return_tensors=None):
@@ -122,6 +125,7 @@ class LlavaCollator:
             dict: A batch dictionary containing processed "pixel_values", "input_ids", and "labels".
         """
         # Extract images and conversations from the batch
+        print(features[0].keys(), flush=True)
         images = [item["image"] for item in features]
         conversations = [item["conversations"] for item in features]
 
@@ -137,7 +141,7 @@ class LlavaCollator:
             tokenized_texts,
             return_tensors="pt",
             padding=True,
-            truncation=True
+            truncation=True,
         )
 
         # Create labels (deep copy of input_ids)
