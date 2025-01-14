@@ -1,7 +1,11 @@
+# Customized
 tango_workspace/
 .pixi/
 .cache/
 .ruff_cache/
+develop/
+slurm_scripts/
+artifacts/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
