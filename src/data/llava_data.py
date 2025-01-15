@@ -18,36 +18,6 @@ def process_conversations(conversations):
     return results
 
 
-# def load_llava_data(path_to_data, split="pretrain"): # split = pretrain / instruction
-#     if split == "pretrain":
-#         with open(os.path.join(path_to_data,"blip_laion_cc_sbu_558k.json"), "r") as f:
-#             llava_data = json.load(f)
-
-#         llava_data = llava_data[:5000]  # TODO: remove
-
-#         for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
-#             # load the actual images
-#             llava_data[i]["image"] = Image.open(os.path.join(path_to_data, "images", llava_data[i]["image"]))
-#             llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
-
-#     elif split == "instruction":
-
-#         with open(os.path.join(path_to_data,"llava_v1_5_mix665k.json"), "r") as f:
-#             llava_data = json.load(f)
-        
-#         llava_data = llava_data[:5000]  # TODO: remove
-
-#         for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
-#             # load the actual images
-#             llava_data[i]["image"] = Image.open(os.path.join(path_to_data, llava_data[i]["image"]))
-#             llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
-
-#     else:
-#         raise NotImplementedError("data split not implemented")
-
-#     return llava_data
-
-
 def load_llava_data(path_to_data, split="pretrain"): # split = pretrain / instruction
     if split == "pretrain":
         with open(os.path.join(path_to_data,"blip_laion_cc_sbu_558k.json"), "r") as f:
@@ -124,7 +94,6 @@ class LlavaCollator:
             dict: A batch dictionary containing processed "pixel_values", "input_ids", and "labels".
         """
         # Extract images and conversations from the batch
-        print(features[0].keys(), flush=True)
         images = [item["image"] for item in features]
         conversations = [item["conversations"] for item in features]
 
