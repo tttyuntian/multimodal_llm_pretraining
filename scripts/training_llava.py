@@ -72,7 +72,7 @@ def train(
         args=TrainingArguments(
             output_dir=output_dir,
             **training_arguments,
-            dataloader_num_workers=1,
+            remove_unused_columns=False
         ),
         data_collator=data_collator,
         train_dataset=train_dataset,
