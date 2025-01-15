@@ -36,6 +36,7 @@ def run_benchmark(
     gpus_per_node: int,
     gpu_type: GpuT,
     model: ModelT,
+    phase: int,
     methods: Literal["naive", "free-lunch", "all"] = "all",
     cmd: Literal["run", "count", "print-incomplete", "print-results"] = "run",
     slurm: bool = False,
@@ -73,7 +74,8 @@ def run_benchmark(
             activation_checkpointing=activation_checkpointing,
             sharding=sharding,
             offloading=offloading,
-        )
+        ),
+        phase=phase,
     )
 
     Sweep.run(experiment_sweep=experiment_sweep, cmd=cmd, slurm=slurm)

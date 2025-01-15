@@ -14,7 +14,7 @@ from experiments import Experiment, SlurmJob, distribute, step
 from experiments.config import TrainingConfig
 
 
-def build_benchmarking_trainer(config: TrainingConfig, disable_compile: bool = False) -> ManualTrainer:
+def build_benchmarking_trainer(config: TrainingConfig, disable_compile: bool = False, phase: int = None) -> ManualTrainer:
     training_class = config.training_class(
         num_training_steps=1,
         micro_batch_size=1,
@@ -24,7 +24,7 @@ def build_benchmarking_trainer(config: TrainingConfig, disable_compile: bool = F
         training_class = dataclasses.replace(training_class, compile=False)
 
     model_class = config.model_class()
-    model = model_class.build_model(use_custom_kernels=config.free_lunch)
+    model = model_class.build_model(phase=phase, use_custom_kernels=config.free_lunch)
     train_dataset = model_class.load_dummy_dataset()
 
     trainer = training_class.build_trainer(
@@ -40,19 +40,19 @@ def build_benchmarking_trainer(config: TrainingConfig, disable_compile: bool = F
     return ManualTrainer.from_trainer(trainer)
 
 
-def find_largest_batch_size_worker(config: TrainingConfig, limit: int):
+def find_largest_batch_size_worker(config: TrainingConfig, limit: int, phase: int):
     try:
-        trainer = build_benchmarking_trainer(config, disable_compile=True)
+        trainer = build_benchmarking_trainer(config, disable_compile=True, phase=phase)
     except torch.cuda.OutOfMemoryError:
         return 0
     return find_max_mbs_pow2(trainer, limit=limit)
 
 
 @step(cacheable=True, version="001")
-def find_largest_batch_size(config: TrainingConfig, limit: int) -> int:
+def find_largest_batch_size(config: TrainingConfig, limit: int, phase: int) -> int:
     return distribute(
         func=find_largest_batch_size_worker,
-        func_kwargs={"config": config, "limit": limit},
+        func_kwargs={"config": config, "limit": limit, "phase": phase},
         workers_per_host=config.gpus_per_node,
     )
 
@@ -89,6 +89,7 @@ def benchmark_step_time(
     target_micro_batch_size: int,
     num_benchmarking_steps: int,
     trial: int = 0,
+    phase: int = None,
 ) -> BenchmarkingResults | None:
     micro_batch_size = max_micro_batch_size
 
@@ -146,6 +147,7 @@ class TrainingTimeEmpirical(Experiment):
     config: TrainingConfig
     benchmarking_steps: int = 3
     trial: int = 0
+    phase: int = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -192,7 +194,11 @@ class TrainingTimeEmpirical(Experiment):
     @property
     def step_dict(self) -> dict[str, Step]:
         steps = {}
-        steps["max_micro_batch_size"] = find_largest_batch_size(config=self.config, limit=self.target_micro_batch_size)
+        steps["max_micro_batch_size"] = find_largest_batch_size(
+            config=self.config, 
+            limit=self.target_micro_batch_size,
+            phase=self.phase,
+        )
         steps["benchmarking_results"] = benchmark_step_time(
             config=self.config,
             max_micro_batch_size=steps["max_micro_batch_size"],

@@ -15,6 +15,7 @@ class TrainingTimeEmpiricalSweep(Sweep[TrainingTimeEmpirical]):
     search_space: Annotated[dict[str, list] | Path | str, tyro.conf.arg(constructor=Path)]
     benchmarking_steps: int = 3
     trial: int = 0
+    phase: int = None
 
     def __post_init__(self) -> None:
         if isinstance(self.search_space, (Path, str)):
@@ -31,6 +32,7 @@ class TrainingTimeEmpiricalSweep(Sweep[TrainingTimeEmpirical]):
                 config=config,
                 benchmarking_steps=self.benchmarking_steps,
                 trial=self.trial,
+                phase=self.phase,
             )
             if experiment.is_valid():
                 experiment_list.append(experiment)
