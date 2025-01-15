@@ -60,7 +60,6 @@ def train(
 
     model = get_model(model_type, phase)
     train_dataset = get_dataset(model_type, data_path, data_split)
-    print(train_dataset.__getitem__(0), flush=True)
     data_collator = get_data_collator(model_type)
 
     optimizer_cls_and_kwargs = get_optimizer_cls_and_kwargs(
