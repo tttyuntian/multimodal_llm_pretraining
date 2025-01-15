@@ -18,8 +18,8 @@ from . import LlavaT, MultimodalModelClass
 
 
 class LlavaModelClass(MultimodalModelClass[LlavaT]):
-    def build_model(self, phase: int, use_custom_kernels: bool = True) -> PreTrainedModel:
-        vision_config = CLIPVisionConfig.from_pretrained("openai/clip-vit-large-patch14-336")
+    def build_model(self, phase: int, use_custom_kernels: bool = True, ckpt_path: str = None) -> PreTrainedModel:
+        vision_config = CLIPVisionConfig.from_pretrained("openai/clip-vit-large-patch14-336") # TODO: get rid of hard-coded model checkpoints
         text_config = AutoConfig.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
         config = LlavaConfig(
             vision_config=vision_config,
@@ -28,16 +28,18 @@ class LlavaModelClass(MultimodalModelClass[LlavaT]):
         model = LlavaForConditionalGeneration(config) # TODO: check the forward() call and see how to introduce image special token.
         
         # Freeze visual encoder's parameters
-        if phase == 1:
+        if phase == 1: # LLaVA pretraining phase
             for name, param in model.named_parameters():
                 if name.startswith("vision_tower") or name.startswith("language_model"):
                     param.requires_grad = False
-        elif phase == 2:
+        
+        elif phase == 2: # LLaVA finetuning phase, need to load pretrained checkpoint
+            
+            model.load_state_dict(torch.load(ckpt_path, weights_only=True))
+
             for name, param in model.named_parameters():
                 if name.startswith("vision_tower"):
                     param.requires_grad = False
-        num_trainable_params = self.get_num_trainable_params(model)
-        print(f"num_trainable_params: {num_trainable_params}")
 
         # add a new <image> token and change the config.image_token_index to that new token
         processor = LlavaProcessor(
@@ -51,6 +53,10 @@ class LlavaModelClass(MultimodalModelClass[LlavaT]):
         model.config.image_token_index = processor.tokenizer.encode("<image>", add_special_tokens=False)[0]
 
         self.set_image_token_index(model.config.image_token_index)
+
+        # Sanity check
+        num_trainable_params = self.get_num_trainable_params(model)
+        print(f"num_trainable_params: {num_trainable_params}", flush=True)
 
         return model
 
