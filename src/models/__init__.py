@@ -37,7 +37,7 @@ ConvNextT = Literal["convnext-large-1k", "convnext-large-22k", "convnext-xlarge-
 
 ViTT = Literal["vit"]
 
-LlavaT = Literal["llava"]
+LlavaT = Literal["llava-pretrain", "llava-finetune"]
 
 ModelT = Literal[
     RobertaT,
@@ -250,10 +250,14 @@ def get_model_class(model_type: ModelT) -> BaseModelClass:
             from .vit import ViTModelClass
 
             return ViTModelClass(model_type)
-        case "llava":
-            from .llava import LlavaModelClass
+        case "llava-pretrain":
+            from .llava import LlavaPretrainModelClass
 
-            return LlavaModelClass(model_type)
+            return LlavaPretrainModelClass(model_type)
+        case "llava-finetune":
+            from .llava import LlavaFinetuneModelClass
+
+            return LlavaFinetuneModelClass(model_type)
 
 
 __all__ = ["ModelT", "BaseModelClass", "LanguageModelClass", "VisionModelClass", "MultimodalModelClass", "get_model_class"]
