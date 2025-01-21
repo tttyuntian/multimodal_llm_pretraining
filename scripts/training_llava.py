@@ -12,8 +12,8 @@ from torch.utils.data import Dataset
 from transformers import PreTrainedModel, Trainer, TrainingArguments
 
 
-def get_model(model_type: ModelT, phase: int) -> PreTrainedModel:
-    return get_model_class(model_type).build_model(phase, use_custom_kernels=True)
+def get_model(model_type: ModelT) -> PreTrainedModel:
+    return get_model_class(model_type).build_model(use_custom_kernels=True)
 
 
 def get_dataset(model_type: ModelT, data_path: Path, data_split: str) -> Dataset:
@@ -25,7 +25,7 @@ def get_dataset(model_type: ModelT, data_path: Path, data_split: str) -> Dataset
 
 
 def get_data_collator(model_type: ModelT):
-    if model_type == "llava":
+    if model_type in ["llava-pretrain", "llava-finetune"]:
         from src.data.llava_data import LlavaCollator
         return LlavaCollator()
     else:
@@ -52,13 +52,12 @@ def train(
     training_arguments: dict[str, Any],
     data_path: Path,
     data_split: str,
-    phase: int,
 ):
     if check_cuda_p2p_ib_support() is False:
         os.environ["NCCL_P2P_DISABLE"] = "1"
         os.environ["NCCL_IB_DISABLE"] = "1"
 
-    model = get_model(model_type, phase)
+    model = get_model(model_type)
     train_dataset = get_dataset(model_type, data_path, data_split)
     data_collator = get_data_collator(model_type)
 
@@ -88,7 +87,6 @@ def run(
     training_arguments: Path, 
     data_path: Path, 
     data_split: str,
-    phase: int,
 ):
     training_arguments = json.load(open(training_arguments, "r"))
     launcher.run(
@@ -99,7 +97,6 @@ def run(
             training_arguments=training_arguments,
             data_path=data_path,
             data_split=data_split,
-            phase=phase,
         ),
     )
 

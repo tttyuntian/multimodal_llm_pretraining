@@ -18,7 +18,7 @@ def process_conversations(conversations):
     return results
 
 
-def load_llava_data(path_to_data, split="pretrain"): # split = pretrain / instruction
+def load_llava_data(path_to_data, split): # split = pretrain / instruction
     if split == "pretrain":
         with open(os.path.join(path_to_data,"blip_laion_cc_sbu_558k.json"), "r") as f:
             llava_data = json.load(f)
@@ -26,7 +26,6 @@ def load_llava_data(path_to_data, split="pretrain"): # split = pretrain / instru
         # llava_data = llava_data[:5000]  # TODO: remove
 
         for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
-            # load the actual images
             llava_data[i]["image_path"] = os.path.join(path_to_data, "images", llava_data[i]["image"])
             llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
 
@@ -37,10 +36,20 @@ def load_llava_data(path_to_data, split="pretrain"): # split = pretrain / instru
         
         # llava_data = llava_data[:5000]  # TODO: remove
 
+        missing_image_idx_list = set([])
         for i in tqdm(range(len(llava_data)), total=len(llava_data), desc="Loading images and modifying conversations"):
-            # load the actual images
+            if "image" not in llava_data[i]:
+                missing_image_idx_list.add(i)
+                continue
             llava_data[i]["image_path"] = os.path.join(path_to_data, llava_data[i]["image"])
             llava_data[i]["conversations"] = process_conversations(llava_data[i]["conversations"])
+
+        # Filter out the examples with no corresponding images
+        llava_data = [
+            example
+            for i, example in enumerate(llava_data)
+            if i not in missing_image_idx_list
+        ]        
 
     else:
         raise NotImplementedError("data split not implemented")
@@ -51,8 +60,8 @@ def load_llava_data(path_to_data, split="pretrain"): # split = pretrain / instru
 class LlavaDataset(Dataset):
     def __init__(
         self,
-        path_to_llava_data="/gpfs/data/superlab/datasets/LLaVA-Pretrain",  # TODO: remove default arguments
-        split="pretrain", # pretrain or instruction
+        path_to_llava_data,
+        split, # "pretrain" or "instruction"
     ) -> None:
         super().__init__()
         self._all_data = load_llava_data(path_to_llava_data, split=split)
@@ -62,7 +71,6 @@ class LlavaDataset(Dataset):
 
     def get_image(self, idx):
         return Image.open(self._all_data[idx]["image_path"])
-        # return self._all_data[idx]["image"]
 
     def __getitem__(self, idx):
         return {
