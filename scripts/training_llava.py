@@ -24,10 +24,10 @@ def get_dataset(model_type: ModelT, data_path: Path, data_split: str) -> Dataset
     )
 
 
-def get_data_collator(model_type: ModelT):
+def get_data_collator(model_type: ModelT, patch_size: int, vision_feature_select_strategy: str):
     if model_type in ["llava-pretrain", "llava-finetune"]:
         from src.data.llava_data import LlavaCollator
-        return LlavaCollator()
+        return LlavaCollator(patch_size, vision_feature_select_strategy)
     else:
         raise NotImplementedError(f"{model_type} has no data collator implemented yet.")
 
@@ -59,7 +59,11 @@ def train(
 
     model = get_model(model_type)
     train_dataset = get_dataset(model_type, data_path, data_split)
-    data_collator = get_data_collator(model_type)
+    data_collator = get_data_collator(
+        model_type, 
+        patch_size=model.config.vision_config.image_size,
+        vision_feature_select_strategy="default",
+    )
 
     optimizer_cls_and_kwargs = get_optimizer_cls_and_kwargs(
         model_type, using_deepspeed=(training_arguments.get("deepspeed") is not None)
