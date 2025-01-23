@@ -39,6 +39,10 @@ ViTT = Literal["vit"]
 
 LlavaT = Literal["llava-pretrain", "llava-finetune"]
 
+BlipT = ["blip-pretrain"]
+
+InstructBlipT = Literal["instructblip-finetune"]
+
 ModelT = Literal[
     RobertaT,
     PythiaT,
