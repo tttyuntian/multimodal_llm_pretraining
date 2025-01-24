@@ -148,7 +148,7 @@ class LlavaPretrainModelClass(MultimodalModelClass[LlavaT]):
 
 class LlavaFinetuneModelClass(MultimodalModelClass[LlavaT]):
     def build_model(self, use_custom_kernels: bool = True) -> PreTrainedModel:
-        ckpt_path = "/gpfs/data/epavlick/tyun/cross_modal_alignment/multimodal_llm_pretraining/output/llava-pretrain/checkpoint-2180"
+        ckpt_path = "/gpfs/data/epavlick/share/llava-pretrain/checkpoint-2180"
         model = LlavaForConditionalGeneration.from_pretrained(ckpt_path) # TODO: check the forward() call and see how to introduce image special token.
 
         # add a new <image> token and change the config.image_token_index to that new token
