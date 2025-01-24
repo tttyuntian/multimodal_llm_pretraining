@@ -61,7 +61,7 @@ def train(
     train_dataset = get_dataset(model_type, data_path, data_split)
     data_collator = get_data_collator(
         model_type, 
-        patch_size=model.config.vision_config.image_size,
+        patch_size=model.config.vision_config.patch_size,
         vision_feature_select_strategy="default",
     )
 

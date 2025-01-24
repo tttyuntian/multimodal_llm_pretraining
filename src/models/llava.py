@@ -5,6 +5,8 @@ import torch.optim
 from transformers import (
     AutoConfig,
     CLIPVisionConfig,
+    CLIPVisionModel,
+    LlamaForCausalLM,
     LlavaConfig,
     LlavaForConditionalGeneration,
     PreTrainedModel,
@@ -26,11 +28,10 @@ class LlavaPretrainModelClass(MultimodalModelClass[LlavaT]):
             text_config=text_config,
         )
         model = LlavaForConditionalGeneration(config) # TODO: check the forward() call and see how to introduce image special token.
-        
-        # Freeze visual encoder's parameters
-        for name, param in model.named_parameters():
-            if name.startswith("vision_tower") or name.startswith("language_model"):
-                param.requires_grad = False
+
+        # Load pretrained vision model and text model
+        model.vision_tower = CLIPVisionModel.from_pretrained("openai/clip-vit-large-patch14-336", cache_dir=".cache/huggingface")
+        model.language_model = LlamaForCausalLM.from_pretrained("meta-llama/Llama-3.2-1B-Instruct", cache_dir=".cache/huggingface")
 
         # add a new <image> token and change the config.image_token_index to that new token
         processor = LlavaProcessor(
@@ -40,10 +41,15 @@ class LlavaPretrainModelClass(MultimodalModelClass[LlavaT]):
 
         processor.tokenizer.add_tokens("<image>")
 
-        model.resize_token_embeddings(len(processor.tokenizer)) # need this to avoid cuda error
+        model.resize_token_embeddings(len(processor.tokenizer)) # NOTE: need this to avoid cuda error
         model.config.image_token_index = processor.tokenizer.encode("<image>", add_special_tokens=False)[0]
 
         self.set_image_token_index(model.config.image_token_index)
+
+        # Freeze visual encoder's parameters
+        for name, param in model.named_parameters():
+            if name.startswith("vision_tower") or name.startswith("language_model"):
+                param.requires_grad = False
 
         # Sanity check
         num_trainable_params = self.get_num_trainable_params(model)
@@ -142,24 +148,8 @@ class LlavaPretrainModelClass(MultimodalModelClass[LlavaT]):
 
 class LlavaFinetuneModelClass(MultimodalModelClass[LlavaT]):
     def build_model(self, use_custom_kernels: bool = True) -> PreTrainedModel:
-        # vision_config = CLIPVisionConfig.from_pretrained("openai/clip-vit-large-patch14-336") # TODO: get rid of hard-coded model checkpoints
-        # text_config = AutoConfig.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
-        # config = LlavaConfig(
-        #     vision_config=vision_config,
-        #     text_config=text_config,
-        # )
-
         ckpt_path = "/gpfs/data/epavlick/tyun/cross_modal_alignment/multimodal_llm_pretraining/output/llava-pretrain/checkpoint-2180"
         model = LlavaForConditionalGeneration.from_pretrained(ckpt_path) # TODO: check the forward() call and see how to introduce image special token.
-        
-        # # Load pretrained weights
-        # ckpt_path = "/gpfs/data/epavlick/tyun/cross_modal_alignment/multimodal_llm_pretraining/output/llava-pretrain/checkpoint-2180"  # TODO: get rid of hard-coded checkpoint path
-        # model.load_state_dict(torch.load(ckpt_path, weights_only=True))
-
-        # Freeze visual encoder's parameters
-        for name, param in model.named_parameters():
-            if name.startswith("vision_tower"):
-                param.requires_grad = False
 
         # add a new <image> token and change the config.image_token_index to that new token
         processor = LlavaProcessor(
@@ -169,10 +159,15 @@ class LlavaFinetuneModelClass(MultimodalModelClass[LlavaT]):
 
         processor.tokenizer.add_tokens("<image>")
 
-        model.resize_token_embeddings(len(processor.tokenizer)) # need this to avoid cuda error
+        model.resize_token_embeddings(len(processor.tokenizer)) # NOTE: need this to avoid cuda error
         model.config.image_token_index = processor.tokenizer.encode("<image>", add_special_tokens=False)[0]
 
         self.set_image_token_index(model.config.image_token_index)
+
+        # Freeze visual encoder's parameters
+        for name, param in model.named_parameters():
+            if name.startswith("vision_tower"):
+                param.requires_grad = False
 
         # Sanity check
         num_trainable_params = self.get_num_trainable_params(model)
