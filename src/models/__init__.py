@@ -43,6 +43,8 @@ BlipT = ["blip-pretrain"]
 
 InstructBlipT = Literal["instructblip-finetune"]
 
+ViltT = Literal["vilt-pretrain", "vilt-finetune"]
+
 ModelT = Literal[
     RobertaT,
     PythiaT,
@@ -262,6 +264,14 @@ def get_model_class(model_type: ModelT) -> BaseModelClass:
             from .llava import LlavaFinetuneModelClass
 
             return LlavaFinetuneModelClass(model_type)
+        case "vilt-pretrain":
+            from .vilt import ViltPretrainModelClass
+
+            return ViltPretrainModelClass(model_type)
+        case "vilt-finetune":
+            from .vilt import ViltFinetuneModelClass
+
+            return ViltFinetuneModelClass(model_type)
 
 
 __all__ = ["ModelT", "BaseModelClass", "LanguageModelClass", "VisionModelClass", "MultimodalModelClass", "get_model_class"]
