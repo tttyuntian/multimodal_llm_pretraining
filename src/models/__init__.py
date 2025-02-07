@@ -52,6 +52,7 @@ ModelT = Literal[
     ConvNextT,
     ViTT,
     LlavaT,
+    ViltT,
 ]
 
 ##
