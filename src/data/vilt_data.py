@@ -3,6 +3,7 @@ import json
 import os
 from PIL import Image
 from tqdm import tqdm
+import random
 
 import torch
 from torch.utils.data import Dataset
@@ -226,7 +227,9 @@ class ViltCollator:
         # --- 8. Return the Combined Tensors ---
         return {
             "pixel_values": combined_pixel_values,      
+            "pixel_mask": torch.ones_like(combined_pixel_values).long(),
             "input_ids": combined_input_ids,
+            "token_type_ids": torch.zeros_like(combined_input_ids).long(),
             "attention_mask": combined_attention_mask,
             "mlm_labels": combined_mlm_labels,          # for MLM loss
             "itm_labels": combined_itm_labels,          # for ITM loss, 1 for matched, 0 for mismatched
