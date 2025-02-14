@@ -159,14 +159,18 @@ class ViltCollator:
         return labels
 
 
-    def __call__(self, features, return_tensors="pt"):
+    def __call__(self, features, return_tensors="pt", return_data_types=["mlm", "itm"]):
 
-        # --- 1. Extract Data ---
+        items_to_return = {}
+
+        # =================== regular input part ======================
+
+        # get images and captions
         images = [item["image"] for item in features]
         captions = [item["caption"] for item in features]
 
-        # --- 2. Process images and Tokenize Captions  ---
-        pixel_values = self.image_processor(images, return_tensors="pt")
+        # tokenize captions
+        pixel_values = self.image_processor(images, return_tensors="pt")['pixel_values']
 
         inputs = self.tokenizer(
             captions,
@@ -174,63 +178,81 @@ class ViltCollator:
             padding=True,
             truncation=True,
         )
-        
-        # --- 3. Generate Whole Word Mask for MLM ---
-        subword_marked_texts = self._process_subwords(inputs)
-        all_masks = []
-        for s_marked_caption in subword_marked_texts:
-            current_mask = self._whole_word_mask(s_marked_caption)
-            all_masks.append(current_mask)
-        
-        # --- 4. Prepare MLM Labels ---
-        mlm_labels = self._get_labels(inputs["input_ids"], all_masks)
 
-        # --- 5. Replace Mask Positions with the Mask Token ---
-        for i, mask in enumerate(all_masks):
-            mask_tensor = torch.tensor(mask, dtype=torch.bool, device=inputs["input_ids"].device)
-            inputs["input_ids"][i, mask_tensor] = self.tokenizer.mask_token_id
-
-        # --- 6. ITM Input Preparation: Create Matched and Random Mismatched Pairs ---
-        batch_size = inputs["input_ids"].size(0)
+        batch_size = len(captions)
         device = inputs["input_ids"].device
 
-        # Matched pairs (image-caption correctly aligned) get ITM label 1.
-        matched_itm_labels = torch.ones(batch_size, dtype=torch.long, device=device)
+        items_to_return.update({
+            "default_input_ids": inputs['input_ids'],
+            "default_attention_mask": inputs['attention_mask'],
+            "default_token_type_ids": torch.zeros_like(inputs['input_ids']).long(),
+            "default_pixel_values": pixel_values,
+            "default_pixel_mask": torch.ones_like(pixel_values).long(),
+            "default_labels": inputs['input_ids'],
+        })
+        
 
-        # Create mismatched indices
-        while True:
-            mismatched_indices = torch.randperm(batch_size, device=device)
-            if not torch.any(mismatched_indices == torch.arange(batch_size, device=device)):
-                break
+        # =================== MLM part ======================
 
-        # Construct mismatched pairs using the randomly sampled indices.
-        mismatched_input_ids = inputs["input_ids"][mismatched_indices]
-        mismatched_attention_mask = inputs["attention_mask"][mismatched_indices]
-        mismatched_mlm_labels = mlm_labels[mismatched_indices]
-        mismatched_itm_labels = torch.zeros(batch_size, dtype=torch.long, device=device)
-        if pixel_values is not None:
+        if "mlm" in return_data_types:
+            mlm_input_ids = inputs['input_ids'].clone()
+
+            subword_marked_texts = self._process_subwords(inputs)
+            all_masks = []
+            for s_marked_caption in subword_marked_texts:
+                current_mask = self._whole_word_mask(s_marked_caption)
+                all_masks.append(current_mask)
+            
+            # Prepare MLM Labels, -100 for non-masked tokens and input_id for masked tokens
+            mlm_labels = self._get_labels(mlm_input_ids, all_masks)
+
+            # Replace Mask Positions with the Mask Token
+            for i, mask in enumerate(all_masks):
+                mask_tensor = torch.tensor(mask, dtype=torch.bool, device=device)
+                mlm_input_ids[i, mask_tensor] = self.tokenizer.mask_token_id
+            
+
+            items_to_return.update({
+                "mlm_input_ids": mlm_input_ids,
+                "mlm_attention_mask": inputs['attention_mask'],
+                "mlm_token_type_ids": torch.zeros_like(inputs['input_ids']).long(),
+                "mlm_pixel_values": pixel_values,
+                "mlm_pixel_mask": torch.ones_like(pixel_values).long(),
+                "mlm_labels": mlm_labels, # mlm labels are input_ids for masked tokens and -100 anywhere else
+            })
+        
+        # =================== ITM part ======================
+
+        if "itm" in return_data_types:
+            # Matched pairs (image-caption correctly aligned) get ITM label 1.
+            matched_itm_labels = torch.ones(batch_size, dtype=torch.long, device=device)
+
+            # Create mismatched indices
+            while True:
+                mismatched_indices = torch.randperm(batch_size, device=device)
+                if not torch.any(mismatched_indices == torch.arange(batch_size, device=device)):
+                    break
+
+            # Construct mismatched pairs using the randomly sampled indices.
+            mismatched_input_ids = inputs["input_ids"][mismatched_indices]
+            mismatched_attention_mask = inputs["attention_mask"][mismatched_indices]
+            mismatched_itm_labels = torch.zeros(batch_size, dtype=torch.long, device=device)
             mismatched_pixel_values = pixel_values[mismatched_indices]
-        else:
-            mismatched_pixel_values = None
 
-        # --- 7. Combine Matched and Mismatched Pairs ---
-        combined_input_ids = torch.cat([inputs["input_ids"], mismatched_input_ids], dim=0)
-        combined_attention_mask = torch.cat([inputs["attention_mask"], mismatched_attention_mask], dim=0)
-        combined_mlm_labels = torch.cat([mlm_labels, mismatched_mlm_labels], dim=0)
-        combined_itm_labels = torch.cat([matched_itm_labels, mismatched_itm_labels], dim=0)
-        
-        if pixel_values is None:
-            combined_pixel_values = None
-        else:
+            # combine matched and mismatched inputs to get itm inputs
+            combined_input_ids = torch.cat([inputs["input_ids"], mismatched_input_ids], dim=0)
+            combined_attention_mask = torch.cat([inputs["attention_mask"], mismatched_attention_mask], dim=0)
+            combined_itm_labels = torch.cat([matched_itm_labels, mismatched_itm_labels], dim=0)
             combined_pixel_values = torch.cat([pixel_values, mismatched_pixel_values], dim=0)
-        
-        # --- 8. Return the Combined Tensors ---
-        return {
-            "pixel_values": combined_pixel_values,      
-            "pixel_mask": torch.ones_like(combined_pixel_values).long(),
-            "input_ids": combined_input_ids,
-            "token_type_ids": torch.zeros_like(combined_input_ids).long(),
-            "attention_mask": combined_attention_mask,
-            "mlm_labels": combined_mlm_labels,          # for MLM loss
-            "itm_labels": combined_itm_labels,          # for ITM loss, 1 for matched, 0 for mismatched
-        }
+
+            items_to_return.update({
+                "itm_input_ids": combined_input_ids,
+                "itm_attention_mask": combined_attention_mask,
+                "itm_token_type_ids": torch.zeros_like(combined_input_ids).long(),
+                "itm_pixel_values": combined_pixel_values,
+                "itm_pixel_mask": torch.ones_like(combined_pixel_values).long(),
+                "itm_labels": combined_itm_labels, # for ITM loss, 1 for matched, 0 for mismatched
+            })
+            
+
+        return items_to_return
