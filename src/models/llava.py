@@ -90,7 +90,7 @@ class LlavaPretrainModelClass(MultimodalModelClass[LlavaT]):
     @property
     def mixed_precision(self) -> Literal[None, "bf16", "fp16"]:
         """Whether to used mixed precision. None if only fp32 precision."""
-        return None
+        return "bf16"
 
     @property
     def optimizer(self) -> type[torch.optim.Optimizer]:
