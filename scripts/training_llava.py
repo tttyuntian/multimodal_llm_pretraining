@@ -28,6 +28,9 @@ def get_data_collator(model_type: ModelT, patch_size: int, vision_feature_select
     if model_type in ["llava-pretrain", "llava-finetune"]:
         from src.data.llava_data import LlavaCollator
         return LlavaCollator(patch_size, vision_feature_select_strategy)
+    elif model_type in ["vilt-pretrain"]:
+        from src.data.vilt_data import ViltCollator
+        return ViltCollator()
     else:
         raise NotImplementedError(f"{model_type} has no data collator implemented yet.")
 
