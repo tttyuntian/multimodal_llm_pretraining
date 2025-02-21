@@ -12,7 +12,12 @@ import torch.optim
 from torch.utils.data import Dataset
 from transformers import PreTrainedModel, SchedulerType
 
-from ..benchmarking.data import DummyImageClassificationDataset, DummyTextModelingDataset, DummyMultimodalLanguageModelingDataset
+from ..benchmarking.data import (
+    DummyImageClassificationDataset, 
+    DummyTextModelingDataset, 
+    DummyMultimodalLanguageModelingDataset, 
+    DummyMultimodalLanguageModelingForViltDataset,
+)
 
 ## Define and group model types
 
@@ -216,12 +221,20 @@ class MultimodalModelClass(Generic[T], BaseModelClass[T]):
 
     def load_dummy_dataset(self, sequence_length=512) -> Dataset:
         """Specific objective for image classification. Could override for other vision objectives."""
-        return DummyMultimodalLanguageModelingDataset(
-            vocab_size=self.vocab_size, 
-            sequence_length=sequence_length, 
-            image_size=self.image_size,
-            image_token_id=self.image_token_index,
-        )
+        match self.model_type:
+            case "vilt-pretrain" | "vilt-finetune":
+                return DummyMultimodalLanguageModelingForViltDataset(
+                    vocab_size=self.vocab_size, 
+                    sequence_length=sequence_length, 
+                    image_size=self.image_size,
+                )
+            case _:
+                return DummyMultimodalLanguageModelingDataset(
+                    vocab_size=self.vocab_size, 
+                    sequence_length=sequence_length, 
+                    image_size=self.image_size,
+                    image_token_id=self.image_token_index,
+                )
 
 
 def get_model_class(model_type: ModelT) -> BaseModelClass:

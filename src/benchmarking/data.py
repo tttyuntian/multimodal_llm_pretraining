@@ -118,6 +118,7 @@ class DummyMultimodalLanguageModelingForViltDataset(Dataset):
         print(f"image_size: {image_size}")
         print(f"num_samples: {num_samples}")
         
+        self.image_size = image_size
         self.input_ids = torch.randint(0, vocab_size, (num_samples, sequence_length))
         self.images = torch.rand((num_samples, 3, image_size, image_size))
         
@@ -147,21 +148,21 @@ class DummyMultimodalLanguageModelingForViltDataset(Dataset):
             "attention_mask": torch.ones_like(self.input_ids[idx]).long(),
             "token_type_ids": torch.zeros_like(self.input_ids[idx]).long(),
             "pixel_values": self.images[idx],
-            "pixel_mask": torch.ones_like(self.images[idx]).long(),
+            "pixel_mask": torch.ones([self.image_size, self.image_size]).long(),
             "labels": self.input_ids[idx],
 
             "mlm_input_ids": self.mlm_input_ids[idx],
             "mlm_attention_mask": torch.ones_like(self.input_ids[idx]).long(),
             "mlm_token_type_ids": torch.zeros_like(self.input_ids[idx]).long(),
             "mlm_pixel_values": self.images[idx],
-            "mlm_pixel_mask": torch.ones_like(self.images[idx]).long(),
+            "mlm_pixel_mask": torch.ones([self.image_size, self.image_size]).long(),
             "mlm_labels": self.mlm_labels[idx],
             
             "itm_input_ids": self.input_ids[idx],
             "itm_attention_mask": torch.ones_like(self.input_ids[idx]).long(),
             "itm_token_type_ids": torch.zeros_like(self.input_ids[idx]).long(),
             "itm_pixel_values": self.images[idx],
-            "itm_pixel_mask": torch.ones_like(self.images[idx]).long(),
+            "itm_pixel_mask": torch.ones([self.image_size, self.image_size]).long(),
             "itm_labels": self.itm_labels[idx],
         }
 
