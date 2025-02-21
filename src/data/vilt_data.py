@@ -158,7 +158,6 @@ class ViltCollator:
         labels[~mask_tensor] = IGNORE_INDEX
         return labels
 
-
     def __call__(self, features, return_tensors="pt", return_data_types=["mlm", "itm"]):
 
         items_to_return = {}
@@ -183,12 +182,12 @@ class ViltCollator:
         device = inputs["input_ids"].device
 
         items_to_return.update({
-            "default_input_ids": inputs['input_ids'],
-            "default_attention_mask": inputs['attention_mask'],
-            "default_token_type_ids": torch.zeros_like(inputs['input_ids']).long(),
-            "default_pixel_values": pixel_values,
-            "default_pixel_mask": torch.ones_like(pixel_values).long(),
-            "default_labels": inputs['input_ids'],
+            "input_ids": inputs['input_ids'],
+            "attention_mask": inputs['attention_mask'],
+            "token_type_ids": torch.zeros_like(inputs['input_ids']).long(),
+            "pixel_values": pixel_values,
+            "pixel_mask": torch.ones_like(pixel_values).long(),
+            "labels": inputs['input_ids'],
         })
         
 

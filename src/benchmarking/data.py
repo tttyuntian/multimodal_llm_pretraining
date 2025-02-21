@@ -143,12 +143,12 @@ class DummyMultimodalLanguageModelingForViltDataset(Dataset):
 
     def __getitem__(self, idx):
         return {
-            "default_input_ids": self.input_ids[idx],
-            "default_attention_mask": torch.ones_like(self.input_ids[idx]).long(),
-            "default_token_type_ids": torch.zeros_like(self.input_ids[idx]).long(),
-            "default_pixel_values": self.images[idx],
-            "default_pixel_mask": torch.ones_like(self.images[idx]).long(),
-            "default_labels": self.input_ids[idx],
+            "input_ids": self.input_ids[idx],
+            "attention_mask": torch.ones_like(self.input_ids[idx]).long(),
+            "token_type_ids": torch.zeros_like(self.input_ids[idx]).long(),
+            "pixel_values": self.images[idx],
+            "pixel_mask": torch.ones_like(self.images[idx]).long(),
+            "labels": self.input_ids[idx],
 
             "mlm_input_ids": self.mlm_input_ids[idx],
             "mlm_attention_mask": torch.ones_like(self.input_ids[idx]).long(),
