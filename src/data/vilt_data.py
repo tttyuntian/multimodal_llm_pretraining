@@ -1,4 +1,3 @@
-from collections import defaultdict
 import json
 import os
 from PIL import Image
@@ -7,13 +6,15 @@ import random
 
 import torch
 from torch.utils.data import Dataset
-from transformers import AutoTokenizer, AutoProcessor, LlavaProcessor
+from transformers import AutoTokenizer, AutoProcessor
 
 IGNORE_INDEX = -100
+
 
 def process_conversations_vilt(conversations):
     
     return conversations[-1]["value"]
+
 
 def load_llava_data(path_to_data, split):
     if split == "pretrain":
@@ -52,15 +53,17 @@ class LlavaDatasetforVilt(Dataset):
         }
 
 
-
-
 class ViltCollator:
-    def __init__(self, image_processor, tokenizer, mlm_probability=0.15):
-
+    def __init__(self, image_size, mlm_probability=0.15):
+        self.image_size = image_size
         self.mlm_probability = mlm_probability
-        self.image_processor = image_processor
-        self.tokenizer       = tokenizer
-    
+
+        self.image_processor = AutoProcessor.from_pretrained("laion/CLIP-ViT-g-14-laion2B-s12B-b42K").image_processor
+        self.tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
+        self.tokenizer.pad_token = "<|reserved_special_token_0|>"
+        self.tokenizer.pad_token_id = 128002 # TODO: get rid of hard-coded padding tokens
+        self.tokenizer.mask_token = "<|reserved_special_token_1|>"
+        self.tokenizer.mask_token_id = 128003 # TODO: get rid of hard-coded padding tokens
 
     def _process_subwords(self, tokenized_results):
 
@@ -85,7 +88,6 @@ class ViltCollator:
             all_marked.append(marked_tokens)
         
         return all_marked
-
 
     # ref: https://github.com/huggingface/transformers/blob/v4.48.2/src/transformers/data/data_collator.py#L1028
     def _whole_word_mask(self, input_tokens, max_predictions=512):
@@ -131,8 +133,6 @@ class ViltCollator:
         mask_labels = [1 if i in covered_indexes else 0 for i in range(len(input_tokens))]
         return mask_labels
 
-
-
     def _get_labels(self, input_ids, all_masks):
         """
         Create labels for masked language modeling.
@@ -160,6 +160,7 @@ class ViltCollator:
 
     def __call__(self, features, return_tensors="pt", return_data_types=["mlm", "itm"]):
 
+        batch_size = len(features)
         items_to_return = {}
 
         # =================== regular input part ======================
@@ -186,10 +187,9 @@ class ViltCollator:
             "attention_mask": inputs['attention_mask'],
             "token_type_ids": torch.zeros_like(inputs['input_ids']).long(),
             "pixel_values": pixel_values,
-            "pixel_mask": torch.ones_like(pixel_values).long(),
+            "pixel_mask": torch.ones([batch_size, self.image_size, self.image_size]).long(),
             "labels": inputs['input_ids'],
         })
-        
 
         # =================== MLM part ======================
 
@@ -210,13 +210,12 @@ class ViltCollator:
                 mask_tensor = torch.tensor(mask, dtype=torch.bool, device=device)
                 mlm_input_ids[i, mask_tensor] = self.tokenizer.mask_token_id
             
-
             items_to_return.update({
                 "mlm_input_ids": mlm_input_ids,
                 "mlm_attention_mask": inputs['attention_mask'],
                 "mlm_token_type_ids": torch.zeros_like(inputs['input_ids']).long(),
                 "mlm_pixel_values": pixel_values,
-                "mlm_pixel_mask": torch.ones_like(pixel_values).long(),
+                "mlm_pixel_mask": torch.ones([batch_size, self.image_size, self.image_size]).long(),
                 "mlm_labels": mlm_labels, # mlm labels are input_ids for masked tokens and -100 anywhere else
             })
         
@@ -249,9 +248,8 @@ class ViltCollator:
                 "itm_attention_mask": combined_attention_mask,
                 "itm_token_type_ids": torch.zeros_like(combined_input_ids).long(),
                 "itm_pixel_values": combined_pixel_values,
-                "itm_pixel_mask": torch.ones_like(combined_pixel_values).long(),
+                "itm_pixel_mask": torch.ones([batch_size, self.image_size, self.image_size]).long(),
                 "itm_labels": combined_itm_labels, # for ITM loss, 1 for matched, 0 for mismatched
             })
             
-
         return items_to_return
