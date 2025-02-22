@@ -46,10 +46,17 @@ class LlavaDatasetforVilt(Dataset):
     def get_image(self, idx):
         return Image.open(self._all_data[idx]["image_path"])
 
+    def get_false_image(self, idx):
+        current_idx = idx
+        while current_idx == idx:
+            current_idx = random.randint(0, self.__len__() - 1)
+        return Image.open(self._all_data[current_idx]["image_path"])
+
     def __getitem__(self, idx):
         return {
             "image": self.get_image(idx),
             "caption": self._all_data[idx]["caption"],
+            "false_image": self.get_false_image(idx)
         }
 
 
@@ -222,22 +229,22 @@ class ViltCollator:
         # =================== ITM part ======================
 
         if "itm" in return_data_types:
-            # Matched pairs (image-caption correctly aligned) get ITM label 1.
+
+            false_images = [item["false_image"] for item in features]
+
+            # tokenize captions
+            false_pixel_values = self.image_processor(false_images, return_tensors="pt")['pixel_values']
+
+            # # Matched pairs (image-caption correctly aligned) get ITM label 1.
             matched_itm_labels = torch.ones(batch_size, dtype=torch.long, device=device)
 
-            # Create mismatched indices
-            while True:
-                mismatched_indices = torch.randperm(batch_size, device=device)
-                if not torch.any(mismatched_indices == torch.arange(batch_size, device=device)):
-                    break
-
-            # Construct mismatched pairs using the randomly sampled indices.
-            mismatched_input_ids = inputs["input_ids"][mismatched_indices]
-            mismatched_attention_mask = inputs["attention_mask"][mismatched_indices]
+            # # Construct mismatched pairs using the randomly sampled indices.
+            mismatched_input_ids = inputs["input_ids"].clone()
+            mismatched_attention_mask = inputs["attention_mask"].clone()
             mismatched_itm_labels = torch.zeros(batch_size, dtype=torch.long, device=device)
-            mismatched_pixel_values = pixel_values[mismatched_indices]
+            mismatched_pixel_values = false_pixel_values
 
-            # combine matched and mismatched inputs to get itm inputs
+            # # combine matched and mismatched inputs to get itm inputs
             combined_input_ids = torch.cat([inputs["input_ids"], mismatched_input_ids], dim=0)
             combined_attention_mask = torch.cat([inputs["attention_mask"], mismatched_attention_mask], dim=0)
             combined_itm_labels = torch.cat([matched_itm_labels, mismatched_itm_labels], dim=0)
