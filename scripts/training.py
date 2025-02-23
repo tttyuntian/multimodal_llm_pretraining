@@ -17,20 +17,32 @@ def get_model(model_type: ModelT) -> PreTrainedModel:
 
 
 def get_dataset(model_type: ModelT, data_path: Path, data_split: str) -> Dataset:
-    from src.data.llava_data import LlavaDataset
-    return LlavaDataset(
-        path_to_llava_data=data_path,
-        split=data_split,
-    )
+    if model_type in ["llava-pretrain", "llava-finetune"]:
+        from src.data.llava_data import LlavaDataset
+        return LlavaDataset(
+            path_to_llava_data=data_path,
+            split=data_split,
+        )
+    elif model_type in ["vilt-pretrain", "vilt-finetune"]:
+        from src.data.vilt_data import LlavaDatasetforVilt
+        return LlavaDatasetforVilt(
+            path_to_llava_data=data_path,
+            split=data_split,
+        )
+    else:
+        raise NotImplementedError(f"{model_type} has no dataset implemented yet.")
 
 
-def get_data_collator(model_type: ModelT, patch_size: int, vision_feature_select_strategy: str):
+def get_data_collator(model_type: ModelT, model: PreTrainedModel):
     if model_type in ["llava-pretrain", "llava-finetune"]:
         from src.data.llava_data import LlavaCollator
-        return LlavaCollator(patch_size, vision_feature_select_strategy)
+        return LlavaCollator(
+            patch_size=model.config.vision_config.patch_size,
+            vision_feature_select_strategy="default",
+        )
     elif model_type in ["vilt-pretrain"]:
         from src.data.vilt_data import ViltCollator
-        return ViltCollator()
+        return ViltCollator(model.config.image_size)
     else:
         raise NotImplementedError(f"{model_type} has no data collator implemented yet.")
 
@@ -62,11 +74,7 @@ def train(
 
     model = get_model(model_type)
     train_dataset = get_dataset(model_type, data_path, data_split)
-    data_collator = get_data_collator(
-        model_type, 
-        patch_size=model.config.vision_config.patch_size,
-        vision_feature_select_strategy="default",
-    )
+    data_collator = get_data_collator(model_type, model)
 
     optimizer_cls_and_kwargs = get_optimizer_cls_and_kwargs(
         model_type, using_deepspeed=(training_arguments.get("deepspeed") is not None)
