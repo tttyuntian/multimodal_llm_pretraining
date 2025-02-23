@@ -240,6 +240,111 @@ class ViltPretrainModelClass(MultimodalModelClass[ViltT]):
         return 2048
 
 
+class ViltFinetuneModelClass(MultimodalModelClass[ViltT]):
+    def build_model(self, use_custom_kernels: bool = True) -> PreTrainedModel:
+        # Construct vilt config
+        processor = AutoProcessor.from_pretrained("laion/CLIP-ViT-g-14-laion2B-s12B-b42K")
+
+        vision_config = AutoConfig.from_pretrained("laion/CLIP-ViT-g-14-laion2B-s12B-b42K").vision_config
+        # text_config = AutoConfig.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
+
+        # Load pretrained checkpoint
+        ckpt_path = "/gpfs/data/epavlick/share/vilt-pretrain/checkpoint-2180"
+        model = ViltForPretrain.from_pretrained(ckpt_path)
+        model.target_tasks = ["mlm"]
+
+        # Sanity check
+        num_trainable_params = self.get_num_trainable_params(model)
+        print(f"num_trainable_params: {num_trainable_params}", flush=True)
+
+        return model
+
+    def get_num_trainable_params(self, model):
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    @property
+    def supports_activation_checkpointing(self) -> bool:
+        """Some models don't implement activation (aka gradient) checkpointing. Override and return False if so.
+        Refer to PreTrainedModel.supports_gradient_checkpointing.
+        You can also implement it yourself (see convnext.py for an example).
+        """
+        return False
+
+    @property
+    def supports_compilation(self) -> bool:
+        """Some models do not support torch.compile. Override and return False if so."""
+        return True
+
+    @property
+    def batch_size(self) -> int:
+        """Overall batch size. In our scripts, (num_nodes * gpus_per_node * micro_batch_size * grad_acc_steps)
+        always equals batch_size."""
+        return 128
+
+    @property
+    def training_steps(self) -> int:
+        """Total number of training steps."""
+        return 5197
+
+    @property
+    def mixed_precision(self) -> Literal[None, "bf16", "fp16"]:
+        """Whether to used mixed precision. None if only fp32 precision."""
+        return None
+
+    @property
+    def optimizer(self) -> type[torch.optim.Optimizer]:
+        """The PyTorch optimizer class (not instantiated object), e.g. `torch.optim.AdamW`."""
+        return torch.optim.AdamW
+
+    @property
+    def optimizer_kwargs(self) -> dict[str, Any]:
+        """Keyword arguments for the optimizer class. Not including `params`."""
+        return {
+            "lr": 1e-4,
+            "weight_decay": 0.01,
+        }
+
+    @property
+    def scheduler_type(self) -> SchedulerType:
+        """Learning rate scheduler, referring to implementations in HuggingFace Transformers.
+        transformers.SchedulerType (https://huggingface.co/docs/transformers/en/main_classes/optimizer_schedules#transformers.SchedulerType)"""
+        return SchedulerType.LINEAR
+
+    @property
+    def scheduler_kwargs(self) -> dict[str, Any]:
+        """Keyword arguments for scheduler. Not including `optimizer` or `num_training_steps`."""
+        return {
+            "num_warmup_steps": int(self.training_steps * 0.10),
+        }
+
+    @property
+    def max_grad_norm(self) -> float:
+        """Maximum gradient norm (for gradient clipping)."""
+        return 0.0
+
+    @property
+    def hf_training_args(self) -> dict[str, Any]:
+        """Any extra hyper-parameters for transformers.TrainingArguments."""
+        return {}
+
+    @property
+    def fsdp_layers_to_wrap(self) -> list[str]:
+        """Name of modules to wrap as FSDP units. Usually the significant model layers, e.g. `['GPTNeoXLayer']`."""
+        return ["CLIPEncoderLayer"]
+
+    @property
+    def image_size(self) -> int:
+        return 224
+
+    @property
+    def vocab_size(self) -> int:
+        return 128256
+
+    @property
+    def sequence_length(self) -> int:
+        return 2048
+
+
 class ViltModel(HFViltModel):
     def forward(
         self,
