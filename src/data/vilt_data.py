@@ -3,10 +3,12 @@ import os
 from PIL import Image
 from tqdm import tqdm
 import random
+from copy import deepcopy
 
 import torch
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer, AutoProcessor
+from torch.nn.utils.rnn import pad_sequence
 
 IGNORE_INDEX = -100
 
@@ -215,6 +217,30 @@ class ViltCollator:
         labels[~mask_tensor] = IGNORE_INDEX
         return labels
 
+    def _get_labels_no_tensor(self, input_ids, all_masks):
+        """
+        Create labels for masked language modeling.
+        
+        Args:
+            input_ids (torch.Tensor): Tensor of shape (batch_size, seq_len) containing token ids.
+            all_masks (List[Union[torch.Tensor, List[bool]]]): List of boolean masks indicating which
+                tokens have been masked. Each mask should be of shape (seq_len,), with True at positions
+                where the token has been masked.
+        
+        Returns:
+            torch.Tensor: A tensor of the same shape as input_ids where unmasked positions are replaced with -100,
+                        so that the loss is computed only for the masked tokens.
+        """
+
+        labels = deepcopy(input_ids)
+
+        for i in range(len(labels)):
+            for j in range(len(labels[i])):
+                if all_masks[i][j] == 0:
+                    labels[i][j] = IGNORE_INDEX
+
+        return labels
+
     def __call__(self, features):
         if self.split == "pretrain":
             return self._pretrain__call__(features)
@@ -231,22 +257,25 @@ class ViltCollator:
         images = [item["image"] for item in features]
         pixel_values = self.image_processor(images, return_tensors="pt")['pixel_values']
 
-        conversations_strs = [item["conversations"][0]['content'] + item["conversations"][1]['content'] for item in features]
+        questions = [item["conversations"][0]['content'] for item in features]
+        answers   = [item["conversations"][1]['content'] for item in features]
 
-        inputs = self.tokenizer(
-            conversations_strs,   
-            return_tensors=return_tensors,
-            padding=True,
-            truncation=True,
-        )
+        tokenized_questions = self.tokenizer(questions)
+        tokenized_answers = self.tokenizer(answers, add_special_tokens=False)
+
+        input_ids = [q + a for q, a in zip(tokenized_questions['input_ids'], tokenized_answers['input_ids'])]
+
+        input_ids = [torch.tensor(seq) for seq in input_ids]
+        input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+        attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
 
         items_to_return.update({
-            "input_ids": inputs['input_ids'],
-            "attention_mask": inputs['attention_mask'],
-            "token_type_ids": torch.zeros_like(inputs['input_ids']).long(),
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "token_type_ids": torch.zeros_like(input_ids).long(),
             "pixel_values": pixel_values,
             "pixel_mask": torch.ones([batch_size, self.image_size, self.image_size]).long(),
-            "labels": inputs['input_ids']
+            "labels": input_ids
         })
 
 
@@ -255,21 +284,8 @@ class ViltCollator:
             questions = [item["conversations"][0]['content'] for item in features]
             answers   = [item["conversations"][1]['content'] for item in features]
 
-            tokenized_questions = self.tokenizer(
-                questions,   
-                return_tensors=return_tensors,
-                padding=True,
-                truncation=True,
-            )
-
-            tokenized_answers = self.tokenizer(
-                answers,   
-                return_tensors=return_tensors,
-                padding=True,
-                truncation=True,
-            )
-
-            mlm_tokenized_answers_input_ids = tokenized_answers['input_ids']
+            tokenized_questions = self.tokenizer(questions)
+            tokenized_answers = self.tokenizer(answers, add_special_tokens=False)
 
             subword_marked_texts = self._process_subwords(tokenized_answers)
             all_masks = []
@@ -278,15 +294,26 @@ class ViltCollator:
                 all_masks.append(current_mask)
             
             # Prepare MLM Labels, -100 for non-masked tokens and input_id for masked tokens
-            mlm_labels = self._get_labels(mlm_tokenized_answers_input_ids, all_masks)
+            mlm_labels = self._get_labels_no_tensor(tokenized_answers['input_ids'], all_masks)
+
+            mlm_tokenized_answers_input_ids = tokenized_answers['input_ids']
 
             # Replace Mask Positions with the Mask Token
             for i, mask in enumerate(all_masks):
-                mask_tensor = torch.tensor(mask, dtype=torch.bool, device=mlm_tokenized_answers_input_ids.device)
-                mlm_tokenized_answers_input_ids[i, mask_tensor] = self.tokenizer.mask_token_id
+                for j in range(len(mask)):
+                    if mask[j] == 1:
+                        mlm_tokenized_answers_input_ids[i][j] = self.tokenizer.mask_token_id
 
-            mlm_input_ids = torch.cat([tokenized_questions['input_ids'], mlm_tokenized_answers_input_ids], dim=1)
-            mlm_attention_mask = torch.cat([tokenized_questions['attention_mask'], tokenized_answers['attention_mask']], dim=1)
+            mlm_input_ids = [q + a for q, a in zip(tokenized_questions['input_ids'], mlm_tokenized_answers_input_ids)]
+
+            mlm_labels = [[IGNORE_INDEX for _ in q] + a for q, a in zip(tokenized_questions['input_ids'], mlm_labels)]
+
+            mlm_input_ids = [torch.tensor(seq) for seq in mlm_input_ids]
+            mlm_input_ids = pad_sequence(mlm_input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+            mlm_attention_mask = (mlm_input_ids != self.tokenizer.pad_token_id).long()
+
+            mlm_labels = [torch.tensor(seq) for seq in mlm_labels]
+            mlm_labels = pad_sequence(mlm_labels, batch_first=True, padding_value=IGNORE_INDEX)
 
             items_to_return.update({
                 "mlm_input_ids": mlm_input_ids,
@@ -294,7 +321,7 @@ class ViltCollator:
                 "mlm_token_type_ids": torch.zeros_like(mlm_input_ids).long(),
                 "mlm_pixel_values": pixel_values,
                 "mlm_pixel_mask": torch.ones([batch_size, self.image_size, self.image_size]).long(),
-                "mlm_labels": torch.cat([torch.full_like(tokenized_questions['input_ids'], -100), mlm_labels], dim=1), # mlm labels are input_ids for masked tokens and -100 anywhere else
+                "mlm_labels": mlm_labels, # mlm labels are input_ids for masked tokens and -100 anywhere else
             })
 
         return items_to_return
