@@ -40,9 +40,12 @@ def get_data_collator(model_type: ModelT, model: PreTrainedModel):
             patch_size=model.config.vision_config.patch_size,
             vision_feature_select_strategy="default",
         )
-    elif model_type in ["vilt-pretrain"]:
+    elif model_type == "vilt-pretrain":
         from src.data.vilt_data import ViltCollator
-        return ViltCollator(model.config.image_size)
+        return ViltCollator(model.config.image_size, split="pretrain", mlm_probability=0.15)
+    elif model_type == "vilt-finetune":
+        from src.data.vilt_data import ViltCollator
+        return ViltCollator(model.config.image_size, split="instruction", mlm_probability=1.0)
     else:
         raise NotImplementedError(f"{model_type} has no data collator implemented yet.")
 
