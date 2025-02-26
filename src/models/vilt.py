@@ -5,6 +5,7 @@ import torch.optim
 from torch.nn import Linear, CrossEntropyLoss
 from transformers import (
     AutoConfig,
+    AutoModel,
     AutoProcessor,
     CLIPVisionModel,
     ViltConfig,
@@ -14,19 +15,21 @@ from transformers import (
 from transformers import ViltModel as HFViltModel
 from transformers.modeling_outputs import BaseModelOutputWithPooling, MaskedLMOutput
 from transformers.models.vilt.modeling_vilt import ViltMLMHead, ViltPreTrainedModel
+from transformers.models.vilt.modeling_vilt import TextEmbeddings as HFTextEmbeddings
 
 from . import ViltT, MultimodalModelClass
-    
+
 
 class ViltForPretrain(ViltPreTrainedModel):
     _tied_weights_keys = ["mlm_head.decoder.weight", "mlm_head.decoder.bias"]
 
-    def __init__(self, config, target_tasks=["mlm", "itm"]):
+    def __init__(self, config, token_embedding_hidden_size, target_tasks=["mlm", "itm"]):
         super().__init__(config)
 
         self.target_tasks = target_tasks
 
         self.vilt = ViltModel(config)
+        self.vilt.embeddings.text_embeddings = TextEmbeddings(config, token_embedding_hidden_size)
         self.mlm_head = ViltMLMHead(config)
         self.itm_head = Linear(config.hidden_size, 2)
 
@@ -79,7 +82,7 @@ class ViltForPretrain(ViltPreTrainedModel):
     ) -> Union[MaskedLMOutput, Tuple[torch.FloatTensor]]:
         
         text_seq_len = input_ids.shape[1]
-        loss, mlm_loss, itm_loss = None, None, None
+        loss, mlm_loss, itm_loss, mlm_logits, itm_logits = None, None, None, None, None
         loss_fct = CrossEntropyLoss()  # -100 index = padding token
 
         if "mlm" in self.target_tasks:
@@ -107,8 +110,12 @@ class ViltForPretrain(ViltPreTrainedModel):
             itm_logits = self.itm_head(pooled_output)
             itm_loss = loss_fct(itm_logits.view(-1, 2), itm_labels.view(-1))
 
-        if mlm_labels is not None and itm_labels is not None:
+        if mlm_loss is not None and itm_loss is not None:
             loss = mlm_loss + itm_loss
+        elif mlm_loss is not None:
+            loss = mlm_loss
+        elif itm_loss is not None:
+            loss = itm_loss
 
         if not return_dict:
             output = (mlm_logits, itm_logits,) + outputs[2:]
@@ -129,7 +136,7 @@ class ViltPretrainModelClass(MultimodalModelClass[ViltT]):
         processor = AutoProcessor.from_pretrained("laion/CLIP-ViT-g-14-laion2B-s12B-b42K")
 
         vision_config = AutoConfig.from_pretrained("laion/CLIP-ViT-g-14-laion2B-s12B-b42K").vision_config
-        # text_config = AutoConfig.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
+        text_config = AutoConfig.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
 
         config = ViltConfig(
             vocab_size=self.vocab_size,
@@ -143,7 +150,10 @@ class ViltPretrainModelClass(MultimodalModelClass[ViltT]):
             image_size=processor.image_processor.crop_size["height"],
             patch_size=vision_config.patch_size,
         )
-        model = ViltForPretrain(config, target_tasks=["mlm", "itm"])
+        model = ViltForPretrain(config, text_config.hidden_size, target_tasks=["mlm", "itm"])
+
+        # Load pretrained embedding layer
+        model.vilt.embeddings.text_embeddings.word_embeddings = AutoModel.from_pretrained("meta-llama/Llama-3.2-1B-Instruct").embed_tokens
 
         # Load pretrained vision model and Initialize ViltModel
         model.vilt.encoder = CLIPVisionModel.from_pretrained("laion/CLIP-ViT-g-14-laion2B-s12B-b42K", cache_dir=".cache/huggingface").vision_model.encoder
@@ -174,12 +184,13 @@ class ViltPretrainModelClass(MultimodalModelClass[ViltT]):
     def batch_size(self) -> int:
         """Overall batch size. In our scripts, (num_nodes * gpus_per_node * micro_batch_size * grad_acc_steps)
         always equals batch_size."""
-        return 256
+        return 128
 
     @property
     def training_steps(self) -> int:
         """Total number of training steps."""
-        return 2180
+        return 4360
+        # return 2180
 
     @property
     def mixed_precision(self) -> Literal[None, "bf16", "fp16"]:
@@ -242,13 +253,6 @@ class ViltPretrainModelClass(MultimodalModelClass[ViltT]):
 
 class ViltFinetuneModelClass(MultimodalModelClass[ViltT]):
     def build_model(self, use_custom_kernels: bool = True) -> PreTrainedModel:
-        # Construct vilt config
-        processor = AutoProcessor.from_pretrained("laion/CLIP-ViT-g-14-laion2B-s12B-b42K")
-
-        vision_config = AutoConfig.from_pretrained("laion/CLIP-ViT-g-14-laion2B-s12B-b42K").vision_config
-        # text_config = AutoConfig.from_pretrained("meta-llama/Llama-3.2-1B-Instruct")
-
-        # Load pretrained checkpoint
         ckpt_path = "/gpfs/data/epavlick/share/vilt-pretrain/checkpoint-2180"
         model = ViltForPretrain.from_pretrained(ckpt_path)
         model.target_tasks = ["mlm"]
@@ -460,3 +464,44 @@ class ViltModel(HFViltModel):
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
         )
+
+
+class TextEmbeddings(HFTextEmbeddings):
+    def __init__(self, config, token_embedding_hidden_size):
+        super.__init__(config)
+        self.projection = Linear(token_embedding_hidden_size, config.hidden_size)
+
+    def forward(self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None):
+        if input_ids is not None:
+            input_shape = input_ids.size()
+        else:
+            input_shape = inputs_embeds.size()[:-1]
+
+        seq_length = input_shape[1]
+
+        if position_ids is None:
+            position_ids = self.position_ids[:, :seq_length]
+
+        # Setting the token_type_ids to the registered buffer in constructor where it is all zeros, which usually occurs
+        # when its auto-generated, registered buffer helps users when tracing the model without passing token_type_ids, solves
+        # issue #5664
+        if token_type_ids is None:
+            if hasattr(self, "token_type_ids"):
+                buffered_token_type_ids = self.token_type_ids[:, :seq_length]
+                buffered_token_type_ids_expanded = buffered_token_type_ids.expand(input_shape[0], seq_length)
+                token_type_ids = buffered_token_type_ids_expanded
+            else:
+                token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
+
+        if inputs_embeds is None:
+            inputs_embeds = self.word_embeddings(input_ids)
+            inputs_embeds = self.projection(inputs_embeds)  # Map embeddings into model latent space
+        token_type_embeddings = self.token_type_embeddings(token_type_ids)
+
+        embeddings = inputs_embeds + token_type_embeddings
+        if self.position_embedding_type == "absolute":
+            position_embeddings = self.position_embeddings(position_ids)
+            embeddings += position_embeddings
+        embeddings = self.LayerNorm(embeddings)
+        embeddings = self.dropout(embeddings)
+        return embeddings
