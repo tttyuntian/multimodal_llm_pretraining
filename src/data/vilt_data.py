@@ -244,10 +244,11 @@ class ViltCollator:
     def __call__(self, features):
         if self.split == "pretrain":
             return self._pretrain__call__(features)
+        elif self.split == "instruction":
+            return self._instruction_call(features)
         else:
-            return self._instruction__call__(features)
+            raise NotImplementedError(f"{self.split} is not supported yet.")
 
-    
 
     def _instruction__call__(self, features, return_tensors="pt", return_data_types=["mlm"]):
 
