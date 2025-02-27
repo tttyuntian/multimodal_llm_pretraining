@@ -189,7 +189,7 @@ class ViltPretrainModelClass(MultimodalModelClass[ViltT]):
     @property
     def training_steps(self) -> int:
         """Total number of training steps."""
-        return 4360
+        return 6540
         # return 2180
 
     @property
@@ -468,7 +468,7 @@ class ViltModel(HFViltModel):
 
 class TextEmbeddings(HFTextEmbeddings):
     def __init__(self, config, token_embedding_hidden_size):
-        super.__init__(config)
+        super().__init__(config)
         self.projection = Linear(token_embedding_hidden_size, config.hidden_size)
 
     def forward(self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None):
