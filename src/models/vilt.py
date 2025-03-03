@@ -2,7 +2,9 @@ from typing import Any, Literal, Optional, Union, Tuple
 
 import torch
 import torch.optim
+import torch.nn.functional as F
 from torch.nn import Linear, CrossEntropyLoss
+
 from transformers import (
     AutoConfig,
     AutoModel,
@@ -20,10 +22,65 @@ from transformers.models.vilt.modeling_vilt import TextEmbeddings as HFTextEmbed
 from . import ViltT, MultimodalModelClass
 
 
+def cost_matrix_cosine(x, y, eps=1e-5):
+    """Compute cosine distnace across every pairs of x, y (batched)
+    [B, L_x, D] [B, L_y, D] -> [B, Lx, Ly]"""
+    assert x.dim() == y.dim()
+    assert x.size(0) == y.size(0)
+    assert x.size(2) == y.size(2)
+    x_norm = F.normalize(x, p=2, dim=-1, eps=eps)
+    y_norm = F.normalize(y, p=2, dim=-1, eps=eps)
+    cosine_sim = x_norm.matmul(y_norm.transpose(1, 2))
+    cosine_dist = 1 - cosine_sim
+    return cosine_dist
+
+
+def trace(x):
+    """ compute trace of input tensor (batched) """
+    b, m, n = x.size()
+    assert m == n
+    mask = torch.eye(n, dtype=torch.bool, device=x.device).unsqueeze(0).expand_as(x)
+    trace = x.masked_select(mask).contiguous().view(b, n).sum(dim=-1, keepdim=False)
+    return trace
+
+
+@torch.no_grad()
+def ipot(C, x_len, x_pad, y_len, y_pad, joint_pad, beta, iteration, k):
+    """ [B, M, N], [B], [B, M], [B], [B, N], [B, M, N]"""
+    b, m, n = C.size()
+    sigma = torch.ones(b, m, dtype=C.dtype, device=C.device) / x_len.unsqueeze(1)
+    T = torch.ones(b, n, m, dtype=C.dtype, device=C.device)
+    A = torch.exp(-C.transpose(1, 2) / beta)
+
+    # mask padded positions
+    sigma.masked_fill_(x_pad, 0)
+    joint_pad = joint_pad.transpose(1, 2)
+    T.masked_fill_(joint_pad, 0)
+    A.masked_fill_(joint_pad, 0)
+
+    # broadcastable lengths
+    x_len = x_len.unsqueeze(1).unsqueeze(2)
+    y_len = y_len.unsqueeze(1).unsqueeze(2)
+
+    # mask to zero out padding in delta and sigma
+    x_mask = (x_pad.to(C.dtype) * 1e4).unsqueeze(1)
+    y_mask = (y_pad.to(C.dtype) * 1e4).unsqueeze(1)
+
+    for _ in range(iteration):
+        Q = A * T  # bs * n * m
+        sigma = sigma.view(b, m, 1)
+        for _ in range(k):
+            delta = 1 / (y_len * Q.matmul(sigma).view(b, 1, n) + y_mask)
+            sigma = 1 / (x_len * delta.matmul(Q) + x_mask)
+        T = delta.view(b, n, 1) * Q * sigma
+    T.masked_fill_(joint_pad, 0)
+    return T
+
+
 class ViltForPretrain(ViltPreTrainedModel):
     _tied_weights_keys = ["mlm_head.decoder.weight", "mlm_head.decoder.bias"]
 
-    def __init__(self, config, token_embedding_hidden_size, target_tasks=["mlm", "itm"]):
+    def __init__(self, config, token_embedding_hidden_size, target_tasks=["mlm", "itm", "wpa"]):
         super().__init__(config)
 
         self.target_tasks = target_tasks
@@ -78,11 +135,12 @@ class ViltForPretrain(ViltPreTrainedModel):
         itm_labels: Optional[torch.LongTensor] = None,
         # output_attentions: Optional[bool] = None,
         # output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+        return_dict: Optional[bool] = True,
     ) -> Union[MaskedLMOutput, Tuple[torch.FloatTensor]]:
         
+        ret = {}
         text_seq_len = input_ids.shape[1]
-        loss, mlm_loss, itm_loss, mlm_logits, itm_logits = None, None, None, None, None
+        
         loss_fct = CrossEntropyLoss()  # -100 index = padding token
 
         if "mlm" in self.target_tasks:
@@ -95,8 +153,8 @@ class ViltForPretrain(ViltPreTrainedModel):
             )
             sequence_output = outputs[0]
             text_features = sequence_output[:,:text_seq_len]  # Only look at text sequence
-            mlm_logits = self.mlm_head(text_features)
-            mlm_loss = loss_fct(mlm_logits.view(-1, self.config.vocab_size), mlm_labels.view(-1))
+            ret["mlm_logits"] = self.mlm_head(text_features)
+            ret["mlm_loss"] = loss_fct(ret["mlm_logits"].view(-1, self.config.vocab_size), mlm_labels.view(-1))
 
         if "itm" in self.target_tasks:
             outputs = self.infer(
@@ -107,27 +165,55 @@ class ViltForPretrain(ViltPreTrainedModel):
                 pixel_mask=itm_pixel_mask,
             )
             pooled_output = outputs[1]
-            itm_logits = self.itm_head(pooled_output)
-            itm_loss = loss_fct(itm_logits.view(-1, 2), itm_labels.view(-1))
+            ret["itm_logits"] = self.itm_head(pooled_output)
+            ret["itm_loss"] = loss_fct(ret["itm_logits"].view(-1, 2), itm_labels.view(-1))
+        
+        if "wpa" in self.target_tasks:
+            outputs = self.infer(
+                input_ids=itm_input_ids,
+                attention_mask=itm_attention_mask,
+                token_type_ids=itm_token_type_ids,
+                pixel_values=itm_pixel_values,
+                pixel_mask=itm_pixel_mask,
+            )
+            sequence_output = outputs[0]
+            attention_mask = outputs[-1]  # [batch_size, sequence_len]
 
-        if mlm_loss is not None and itm_loss is not None:
-            loss = mlm_loss + itm_loss
-        elif mlm_loss is not None:
-            loss = mlm_loss
-        elif itm_loss is not None:
-            loss = itm_loss
+            with torch.amp.autocast("cuda", enabled=False):
+                txt_emb, img_emb = sequence_output[:,:text_seq_len], sequence_output[:,text_seq_len:]
+                txt_mask = itm_attention_mask.bool()  # [batch_size, text_seq_len]
+                img_mask = attention_mask[:, text_seq_len:].bool()  # [batch_size, image_seq_len]
 
-        if not return_dict:
-            output = (mlm_logits, itm_logits,) + outputs[2:]
-            return ((loss, mlm_loss, itm_loss,) + output)
+                for i, _len in enumerate(txt_mask.sum(dim=1)):
+                    txt_mask[i, _len - 1] = False
+                txt_mask[:, 0] = False
+                img_mask[:, 0] = False
+                txt_pad, img_pad = ~txt_mask, ~img_mask
 
-        return {
-            "loss": loss,
-            "mlm_loss": mlm_loss,
-            "itm_loss": itm_loss,
-            "mlm_logits": mlm_logits,
-            "itm_logits": itm_logits,
-        }
+                cost = cost_matrix_cosine(txt_emb.float(), img_emb.float())
+                joint_pad = txt_pad.unsqueeze(-1) | img_pad.unsqueeze(-2)
+                cost.masked_fill_(joint_pad, 0)
+
+                txt_len = (txt_pad.size(1) - txt_pad.sum(dim=1, keepdim=False)).to(
+                    dtype=cost.dtype
+                )
+                img_len = (img_pad.size(1) - img_pad.sum(dim=1, keepdim=False)).to(
+                    dtype=cost.dtype
+                )
+                T = ipot(
+                    cost.detach(), txt_len, txt_pad, img_len, img_pad, joint_pad, 0.5, 50, 1
+                )
+                distance = trace(cost.matmul(T.detach()))
+            
+            dist_pos = distance.masked_select(itm_labels == 1)
+            dist_neg = distance.masked_select(itm_labels == 0)
+            ot_loss = (dist_pos.sum() - dist_neg.sum()) / (dist_pos.size(0) + dist_neg.size(0))
+            ret["wpa_loss"] = 0.1 * ot_loss
+            
+        ret["loss"] = sum([v for k, v in ret.items() if "loss" in k])
+        ret["loss"] = None if ret["loss"] == 0.0 else ret["loss"]
+
+        return ret
 
 
 class ViltPretrainModelClass(MultimodalModelClass[ViltT]):
@@ -150,7 +236,7 @@ class ViltPretrainModelClass(MultimodalModelClass[ViltT]):
             image_size=processor.image_processor.crop_size["height"],
             patch_size=vision_config.patch_size,
         )
-        model = ViltForPretrain(config, text_config.hidden_size, target_tasks=["mlm", "itm"])
+        model = ViltForPretrain(config, text_config.hidden_size, target_tasks=["mlm", "itm", "wpa"])
 
         # Load pretrained embedding layer
         model.vilt.embeddings.text_embeddings.word_embeddings = AutoModel.from_pretrained("meta-llama/Llama-3.2-1B-Instruct").embed_tokens
@@ -456,14 +542,31 @@ class ViltModel(HFViltModel):
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
 
         if not return_dict:
-            return (sequence_output, pooled_output) + encoder_outputs[1:]
+            return (sequence_output, pooled_output) + encoder_outputs[1:] + (attention_mask,)
 
         return BaseModelOutputWithPooling(
             last_hidden_state=sequence_output,
             pooler_output=pooled_output,
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
+            attention_mask=attention_mask,
         )
+
+
+# class BaseModelOutputWithPooling(ModelOutput):
+#     def __init__(
+#         self, 
+#         last_hidden_state=None,
+#         pooler_output=None,
+#         hidden_states=None,
+#         attentions=None,
+#         attention_mask=None,
+#     ):
+#         self.last_hidden_state = last_hidden_state
+#         self.pooler_output = pooler_output
+#         self.hidden_states = hidden_states
+#         self.attentions = attentions
+#         self.attention_mask = attention_mask
 
 
 class TextEmbeddings(HFTextEmbeddings):
