@@ -29,6 +29,9 @@ def get_dataset(model_type: ModelT, data_path: Path, data_split: str) -> Dataset
             path_to_llava_data=data_path,
             split=data_split,
         )
+    elif model_type in ["vilt-original-pretrain", "vilt-original-finetune"]:
+        from src.data.vilt_data import Cifar100DatasetforVilt
+        return Cifar100DatasetforVilt()
     else:
         raise NotImplementedError(f"{model_type} has no dataset implemented yet.")
 
@@ -46,6 +49,9 @@ def get_data_collator(model_type: ModelT, model: PreTrainedModel):
     elif model_type == "vilt-finetune":
         from src.data.vilt_data import ViltCollator
         return ViltCollator(model.config.image_size, split="instruction", mlm_probability=1.0)
+    elif model_type == "vilt-original-pretrain":
+        from src.data.vilt_data import ViltCollator_for_original
+        return ViltCollator_for_original(model.config.image_size, split="pretrain", mlm_probability=0.15)
     else:
         raise NotImplementedError(f"{model_type} has no data collator implemented yet.")
 

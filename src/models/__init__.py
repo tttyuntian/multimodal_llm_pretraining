@@ -48,7 +48,7 @@ BlipT = ["blip-pretrain"]
 
 InstructBlipT = Literal["instructblip-finetune"]
 
-ViltT = Literal["vilt-pretrain", "vilt-finetune"]
+ViltT = Literal["vilt-pretrain", "vilt-finetune", "vilt-original-pretrain", "vilt-original-finetune"]
 
 ModelT = Literal[
     RobertaT,
@@ -222,7 +222,7 @@ class MultimodalModelClass(Generic[T], BaseModelClass[T]):
     def load_dummy_dataset(self, sequence_length=512) -> Dataset:
         """Specific objective for image classification. Could override for other vision objectives."""
         match self.model_type:
-            case "vilt-pretrain" | "vilt-finetune":
+            case "vilt-pretrain" | "vilt-finetune" | "vilt-original-pretrain" | "vilt-original-finetune":
                 return DummyMultimodalLanguageModelingForViltDataset(
                     vocab_size=self.vocab_size, 
                     sequence_length=sequence_length, 
@@ -286,6 +286,13 @@ def get_model_class(model_type: ModelT) -> BaseModelClass:
             from .vilt import ViltFinetuneModelClass
 
             return ViltFinetuneModelClass(model_type)
+        case "vilt-original-pretrain":
+            from .vilt_original import ViltPretrainModelClass
 
+            return ViltPretrainModelClass(model_type)
+        case "vilt-original-finetune":
+            from .vilt_original import ViltFinetuneModelClass
+
+            return ViltFinetuneModelClass(model_type)
 
 __all__ = ["ModelT", "BaseModelClass", "LanguageModelClass", "VisionModelClass", "MultimodalModelClass", "get_model_class"]
