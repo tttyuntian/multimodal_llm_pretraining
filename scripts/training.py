@@ -31,7 +31,7 @@ def get_dataset(model_type: ModelT, data_path: Path, data_split: str) -> Dataset
         )
     elif model_type in ["vilt-original-pretrain", "vilt-original-finetune"]:
         from src.data.vilt_data import Cifar100DatasetforVilt
-        return Cifar100DatasetforVilt()
+        return Cifar100DatasetforVilt(path_to_data=data_path)
     else:
         raise NotImplementedError(f"{model_type} has no dataset implemented yet.")
 
