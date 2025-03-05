@@ -2,6 +2,7 @@ from typing import Any, Literal, Optional, Union, Tuple
 
 import torch
 import torch.optim
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import Linear, CrossEntropyLoss
 
@@ -9,6 +10,7 @@ from transformers import (
     AutoConfig,
     AutoModel,
     AutoProcessor,
+    CLIPVisionConfig,
     CLIPVisionModel,
     ViltConfig,
     PreTrainedModel,
@@ -16,7 +18,7 @@ from transformers import (
 )
 from transformers import ViltModel as HFViltModel
 from transformers.modeling_outputs import BaseModelOutputWithPooling, MaskedLMOutput
-from transformers.models.vilt.modeling_vilt import ViltMLMHead, ViltPreTrainedModel
+from transformers.models.vilt.modeling_vilt import ViltMLMHead, ViltPreTrainedModel, ViltEmbeddings, ViltPooler
 from transformers.models.vilt.modeling_vilt import TextEmbeddings as HFTextEmbeddings
 
 from . import ViltT, MultimodalModelClass
@@ -80,13 +82,13 @@ def ipot(C, x_len, x_pad, y_len, y_pad, joint_pad, beta, iteration, k):
 class ViltForPretrain(ViltPreTrainedModel):
     _tied_weights_keys = ["mlm_head.decoder.weight", "mlm_head.decoder.bias"]
 
-    def __init__(self, config, token_embedding_hidden_size, target_tasks=["mlm", "itm", "wpa"]):
+    def __init__(self, config):
         super().__init__(config)
 
-        self.target_tasks = target_tasks
+        self.target_tasks = config.target_tasks
 
         self.vilt = ViltModel(config)
-        self.vilt.embeddings.text_embeddings = TextEmbeddings(config, token_embedding_hidden_size)
+        self.vilt.embeddings.text_embeddings = TextEmbeddings(config)
         self.mlm_head = ViltMLMHead(config)
         self.itm_head = Linear(config.hidden_size, 2)
 
@@ -213,6 +215,7 @@ class ViltForPretrain(ViltPreTrainedModel):
         ret["loss"] = sum([v for k, v in ret.items() if "loss" in k])
         ret["loss"] = None if ret["loss"] == 0.0 else ret["loss"]
 
+        print(f"loss: {ret['loss']}", flush=True)
         return ret
 
 
@@ -235,8 +238,11 @@ class ViltPretrainModelClass(MultimodalModelClass[ViltT]):
             hidden_dropout_prob=vision_config.dropout,
             image_size=processor.image_processor.crop_size["height"],
             patch_size=vision_config.patch_size,
+            encoder_config=vision_config,
+            token_embedding_hidden_size=text_config.hidden_size,
+            target_tasks=["mlm", "itm", "wpa"],
         )
-        model = ViltForPretrain(config, text_config.hidden_size, target_tasks=["mlm", "itm", "wpa"])
+        model = ViltForPretrain(config)
 
         # Load pretrained embedding layer
         model.vilt.embeddings.text_embeddings.word_embeddings = AutoModel.from_pretrained("meta-llama/Llama-3.2-1B-Instruct").embed_tokens
@@ -275,8 +281,7 @@ class ViltPretrainModelClass(MultimodalModelClass[ViltT]):
     @property
     def training_steps(self) -> int:
         """Total number of training steps."""
-        return 6540
-        # return 2180
+        return 10000
 
     @property
     def mixed_precision(self) -> Literal[None, "bf16", "fp16"]:
@@ -436,6 +441,22 @@ class ViltFinetuneModelClass(MultimodalModelClass[ViltT]):
 
 
 class ViltModel(HFViltModel):
+    def __init__(self, config, add_pooling_layer=True):
+        super().__init__(config)
+        self.config = config
+
+        self.embeddings = ViltEmbeddings(config)
+        
+        if isinstance(config.encoder_config, dict):
+            config.encoder_config = CLIPVisionConfig.from_dict(config.encoder_config)
+        self.encoder = CLIPVisionModel(config.encoder_config).vision_model.encoder
+
+        self.layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.pooler = ViltPooler(config) if add_pooling_layer else None
+
+        # Initialize weights and apply final processing
+        self.post_init()
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -570,9 +591,10 @@ class ViltModel(HFViltModel):
 
 
 class TextEmbeddings(HFTextEmbeddings):
-    def __init__(self, config, token_embedding_hidden_size):
+    def __init__(self, config):
         super().__init__(config)
-        self.projection = Linear(token_embedding_hidden_size, config.hidden_size)
+        self.word_embeddings = nn.Embedding(config.vocab_size, config.token_embedding_hidden_size, padding_idx=config.pad_token_id)
+        self.projection = Linear(config.token_embedding_hidden_size, config.hidden_size)
 
     def forward(self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None):
         if input_ids is not None:
