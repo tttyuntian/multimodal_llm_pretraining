@@ -136,15 +136,13 @@ class LlavaDatasetforVilt(Dataset):
 
 
 class Cifar100DatasetforVilt(Dataset):
-    def __init__(
-        self,
-    ) -> None:
+    def __init__(self, path_to_data) -> None:
         super().__init__()
         self._all_data = torchvision.datasets.CIFAR100(
-                root="/users/thua5/modality_interference/datasets",
-                train=True,
-                download=True,
-            )
+            root=path_to_data,
+            train=True,
+            download=True,
+        )
 
         self.classes = [" ".join(c.split("_")) for c in self._all_data.classes]
         
