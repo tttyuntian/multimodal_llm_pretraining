@@ -79,6 +79,18 @@ def ipot(C, x_len, x_pad, y_len, y_pad, joint_pad, beta, iteration, k):
     return T
 
 
+def print_loss(ret):
+    string = ""
+    if "mlm_loss" in ret:
+        string += f"| mlm_loss {ret['mlm_loss']} |"
+    if "itm_loss" in ret:
+        string += f"| itm_loss {ret['itm_loss']} |"
+    if "wpa_loss" in ret:
+        string += f"| wpa_loss {ret['wpa_loss']} |"
+    string += f"| loss {ret['loss']} |"
+    print(string, flush=True)
+
+
 class ViltForPretrain(ViltPreTrainedModel):
     _tied_weights_keys = ["mlm_head.decoder.weight", "mlm_head.decoder.bias"]
 
@@ -215,7 +227,7 @@ class ViltForPretrain(ViltPreTrainedModel):
         ret["loss"] = sum([v for k, v in ret.items() if "loss" in k])
         ret["loss"] = None if ret["loss"] == 0.0 else ret["loss"]
 
-        print(f"loss: {ret['loss']}", flush=True)
+        print_loss(ret)
         return ret
 
 
