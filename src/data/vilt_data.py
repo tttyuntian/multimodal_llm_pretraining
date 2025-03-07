@@ -485,7 +485,7 @@ class ViltCollator:
                 "itm_attention_mask": combined_attention_mask,
                 "itm_token_type_ids": torch.zeros_like(combined_input_ids).long(),
                 "itm_pixel_values": combined_pixel_values,
-                "itm_pixel_mask": torch.ones([batch_size, self.image_size, self.image_size]).long(),
+                "itm_pixel_mask": torch.ones([2*batch_size, self.image_size, self.image_size]).long(),
                 "itm_labels": combined_itm_labels, # for ITM loss, 1 for matched, 0 for mismatched
             })
             
@@ -814,7 +814,7 @@ class ViltCollator_for_original:
                 "itm_attention_mask": combined_attention_mask,
                 "itm_token_type_ids": torch.zeros_like(combined_input_ids).long(),
                 "itm_pixel_values": combined_pixel_values,
-                "itm_pixel_mask": torch.ones([batch_size, self.image_size, self.image_size]).long(),
+                "itm_pixel_mask": torch.ones([2*batch_size, self.image_size, self.image_size]).long(),
                 "itm_labels": combined_itm_labels, # for ITM loss, 1 for matched, 0 for mismatched
             })
             
