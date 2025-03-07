@@ -16,25 +16,29 @@ from transformers import ViltProcessor
 IGNORE_INDEX = -100
 
 
+# CIFAR_CAPTION_TEMPLATES = [
+#     'a photo of a {}.',
+#     'a blurry photo of a {}.',
+#     'a black and white photo of a {}.',
+#     'a low contrast photo of a {}.',
+#     'a high contrast photo of a {}.',
+#     'a bad photo of a {}.',
+#     'a good photo of a {}.',
+#     'a photo of a small {}.',
+#     'a photo of a big {}.',
+#     'a photo of the {}.',
+#     'a blurry photo of the {}.',
+#     'a black and white photo of the {}.',
+#     'a low contrast photo of the {}.',
+#     'a high contrast photo of the {}.',
+#     'a bad photo of the {}.',
+#     'a good photo of the {}.',
+#     'a photo of the small {}.',
+#     'a photo of the big {}.',
+# ]
+
 CIFAR_CAPTION_TEMPLATES = [
-    'a photo of a {}.',
-    'a blurry photo of a {}.',
-    'a black and white photo of a {}.',
-    'a low contrast photo of a {}.',
-    'a high contrast photo of a {}.',
-    'a bad photo of a {}.',
-    'a good photo of a {}.',
-    'a photo of a small {}.',
-    'a photo of a big {}.',
-    'a photo of the {}.',
-    'a blurry photo of the {}.',
-    'a black and white photo of the {}.',
-    'a low contrast photo of the {}.',
-    'a high contrast photo of the {}.',
-    'a bad photo of the {}.',
-    'a good photo of the {}.',
-    'a photo of the small {}.',
-    'a photo of the big {}.',
+    "An image of a {}"
 ]
 
 
@@ -166,6 +170,7 @@ class Cifar100DatasetforVilt(Dataset):
 
         return {
             "image": self.get_image(idx),
+            "class_label": current_class_label,
             "caption": caption_template.format(current_class_label),
             "false_image": self.get_false_image(idx)
         }
@@ -758,6 +763,19 @@ class ViltCollator_for_original:
                 mask_tensor = torch.tensor(mask, dtype=torch.bool, device=device)
                 mlm_input_ids[i, mask_tensor] = self.tokenizer.mask_token_id
             
+            class_labels = [item["class_label"] for item in features]
+            
+            answer_tokens = [self.tokenizer.encode(class_label, add_special_tokens=False) for class_label in class_labels]
+            
+            for i, answer_toks in enumerate(answer_tokens):
+                # Convert answer tokens to a tensor (if not already)
+                answer_toks_tensor = torch.tensor(answer_toks)
+                # Create a boolean mask where the input token is one of the answer tokens
+                mask_positions = torch.isin(mlm_input_ids[i], answer_toks_tensor)
+                # Replace those positions with the mask token ID
+                mlm_input_ids[i][mask_positions] = self.tokenizer.mask_token_id
+                mlm_labels[i][mask_positions]    = inputs['input_ids'][i][mask_positions] 
+
             items_to_return.update({
                 "mlm_input_ids": mlm_input_ids,
                 "mlm_attention_mask": inputs['attention_mask'],
